@@ -1,0 +1,57 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Montserrat:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+:root {
+  --g900: #10312b;
+  --g800: #255441;
+  --g700: #006937;
+  --g600: #4c9c2e;
+  --lima: #76bc21;
+  --crema: #fff3d9;
+  --oro: #b78b1e;
+  --bg: #f4f1e6;
+  --card: #ffffff;
+  --ink: #10312b;
+  --muted: #5a7266;
+  --line: #e2ded0;
+  --soft: #eef3ea;
+  --danger: #b3402e;
+  --radius: 0.9rem;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Montserrat", "Segoe UI", system-ui, sans-serif;
+}
+
+@theme inline {
+  --color-brand-900: var(--g900);
+  --color-brand-800: var(--g800);
+  --color-brand-700: var(--g700);
+  --color-brand-600: var(--g600);
+  --color-lima: var(--lima);
+  --color-crema: var(--crema);
+  --color-oro: var(--oro);
+  --color-surface: var(--bg);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-soft: var(--soft);
+  --color-danger: var(--danger);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-body);
+}
+
+body {
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(118, 188, 33, 0.18), transparent 60%),
+    radial-gradient(900px 400px at 100% 0%, rgba(16, 49, 43, 0.12), transparent 55%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}

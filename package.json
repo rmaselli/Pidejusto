@@ -1,0 +1,21 @@
+{
+  "name": "pidejusto",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @pidejusto/api & npm run dev -w @pidejusto/web",
+    "dev:api": "npm run dev -w @pidejusto/api",
+    "dev:web": "npm run dev -w @pidejusto/web",
+    "build": "npm run build -w @pidejusto/shared && npm run build -w @pidejusto/db && npm run build -w @pidejusto/api && npm run build -w @pidejusto/web",
+    "db:generate": "npm run generate -w @pidejusto/db",
+    "db:migrate": "npm run migrate -w @pidejusto/db",
+    "db:seed": "npm run seed -w @pidejusto/db",
+    "lint": "npm run build -w @pidejusto/shared && npm run build -w @pidejusto/db"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
