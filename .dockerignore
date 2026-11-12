@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/dist
+.git
+.env
+.env.*
+!.env.example
+*.log
+**/coverage
+agent-transcripts
+.cursor
+**/*.pptx
+PideJusto_Promo.png
+PideJusto_Equipo1.html
+PideJusto_Aprobadores_Movil.html
+SAP_API_Simulada_Equipo1_v3.xlsx
