@@ -3,33 +3,36 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: pidejusto
-      POSTGRES_PASSWORD: pidejusto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pidejusto}
       POSTGRES_DB: pidejusto
+    # Host 5433 evita choque con Postgres nativo de Debian en 5432
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pj_pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pidejusto -d pidejusto"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
 
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: postgresql://pidejusto:pidejusto@db:5432/pidejusto
+      DATABASE_URL: postgresql://pidejusto:${POSTGRES_PASSWORD:-pidejusto}@db:5432/pidejusto
       API_PORT: 4000
-      WEB_URL: http://localhost:3000
-      API_URL: http://localhost:4000
+      WEB_URL: ${WEB_URL:-http://192.168.0.14:3000}
+      API_URL: ${API_URL:-http://192.168.0.14:4000}
       SESSION_SECRET: ${SESSION_SECRET:-dev-compose-secret-change-me}
       AUTH_MODE: ${AUTH_MODE:-demo}
       AZURE_AD_CLIENT_ID: ${AZURE_AD_CLIENT_ID:-}
       AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET:-}
       AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID:-}
-      AZURE_AD_REDIRECT_URI: ${AZURE_AD_REDIRECT_URI:-http://localhost:4000/auth/callback}
+      AZURE_AD_REDIRECT_URI: ${AZURE_AD_REDIRECT_URI:-http://192.168.0.14:4000/auth/callback}
       SAP_PROVIDER: ${SAP_PROVIDER:-mock}
       SAP_BASE_URL: ${SAP_BASE_URL:-}
       SAP_COMPANY_DB: ${SAP_COMPANY_DB:-}
@@ -42,19 +45,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
 
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:4000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://192.168.0.14:4000}
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://192.168.0.14:4000}
     ports:
       - "3000:3000"
     depends_on:
       - api
+    restart: unless-stopped
 
 volumes:
   pj_pg:
