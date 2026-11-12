@@ -33,7 +33,8 @@ export function createApp(db: Db, sap: SapProvider) {
       cookie: {
         httpOnly: true,
         sameSite: "lax",
-        secure: config.nodeEnv === "production",
+        // "auto": Secure solo si la petición llega por HTTPS (vía trust proxy)
+        secure: "auto",
         maxAge: 1000 * 60 * 60 * 12,
       },
     }),
