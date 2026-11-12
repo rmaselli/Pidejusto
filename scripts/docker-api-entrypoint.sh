@@ -19,6 +19,8 @@ if (!rows.length) {
   process.exit(r.status ?? 1);
 }
 console.log('Seed skipped (users exist)');
+// El pool de postgres-js mantiene vivo el proceso; salir explícitamente
+process.exit(0);
 "
 
 echo "Starting API..."
