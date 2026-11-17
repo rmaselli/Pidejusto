@@ -106,7 +106,7 @@ export default function LoginPage() {
             Grupo M.E.M.E.
           </div>
           <h1 className="mt-4 font-display text-4xl font-extrabold text-brand-900">
-            Pide Justo
+            PideJusto
           </h1>
           <h2 className="mt-4 font-display text-2xl font-extrabold text-brand-900">Cada proceso cuenta - Solicitud de materiales</h2>
           <p className="mx-auto mt-2 max-w-xl text-muted">
@@ -121,7 +121,7 @@ export default function LoginPage() {
             <ShieldCheck className="mx-auto mb-3 h-10 w-10 text-brand-700" />
             <h2 className="font-display text-xl font-bold">Acceso corporativo</h2>
             <p className="mt-2 text-sm text-muted">
-              Tu cuenta Microsoft 365 se vincula al rol asignado en Pide Justo
+              Tu cuenta Microsoft 365 se vincula al rol asignado en PideJusto
               (Solicitante, Aprobador N1, N2 o N3, Bodega o Admin).
             </p>
             <Button

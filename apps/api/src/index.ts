@@ -8,7 +8,7 @@ async function main() {
   const sap = createSapProvider(db);
   const app = createApp(db, sap);
   app.listen(config.port, () => {
-    console.log(`Pide Justo API on :${config.port}`);
+    console.log(`PideJusto API on :${config.port}`);
     console.log(`Auth mode: ${config.authMode} · SAP: ${sap.kind} (${sap.label})`);
   });
 }

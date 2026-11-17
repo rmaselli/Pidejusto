@@ -51,7 +51,7 @@ export default function MobileLayout({
       <header className="sticky top-0 z-20 rounded-b-[26px] border-b-[3px] border-lima bg-brand-900 px-4 pb-4 pt-[calc(env(safe-area-inset-top)+12px)] text-white">
         <div className="flex items-center gap-3">
           <div>
-            <div className="font-display text-xl font-extrabold">Pide Justo</div>
+            <div className="font-display text-xl font-extrabold">PideJusto</div>
             <div className="text-[10.5px] text-crema/70">Aprobadores · móvil</div>
           </div>
           <div className="ml-auto flex items-center gap-2 rounded-full bg-white/10 py-1 pr-3 pl-1 text-xs font-semibold">

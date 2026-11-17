@@ -214,7 +214,7 @@ export default function SolicitarPage() {
               onChange={(e) => setQ(e.target.value)}
             />
             <Button variant="claude" onClick={() => void searchClaude()} disabled={busy}>
-              Buscar con Claude
+              Buscar en SAP
             </Button>
           </div>
           <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-line">

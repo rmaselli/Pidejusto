@@ -116,7 +116,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-4">
           <div>
             <div className="font-display text-xl font-extrabold tracking-tight">
-              Pide Justo
+              PideJusto
             </div>
             <div className="text-xs text-crema/80">
               Grupo M.E.M.E. SAP

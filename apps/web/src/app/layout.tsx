@@ -4,7 +4,7 @@ import { AuthProvider } from "@/components/auth-provider";
 import { Shell } from "@/components/shell";
 
 export const metadata: Metadata = {
-  title: "Pide Justo",
+  title: "PideJusto",
   description: "Portal de solicitud de materiales · Grupo M.E.M.E.",
 };
 

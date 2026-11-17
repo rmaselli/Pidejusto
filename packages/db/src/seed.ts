@@ -293,7 +293,7 @@ async function main() {
     {
       id: "ADMIN",
       email: "admin@grupo-meme.demo",
-      nombre: "Admin Pide Justo",
+      nombre: "Admin PideJusto",
       rol: "Admin",
       empresa: "TODAS",
       puesto: "Administrador del sistema",
