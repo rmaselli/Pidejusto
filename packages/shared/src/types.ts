@@ -116,11 +116,16 @@ export interface ContableImputacion {
   validacion: string;
 }
 
+export const MAX_LINEAS_SOLICITUD = 21;
+
+export type ClaseSolicitud = "articulo" | "servicio";
+
 export interface LineaSolicitud {
   emp: string;
   code: string;
   name: string;
   cat: string;
+  clase?: ClaseSolicitud;
   qty: number;
   price: number;
   total: number;
@@ -173,6 +178,7 @@ export interface SolicitudPostRow {
   Empresa: string;
   ItemCode: string;
   ItemDescription: string;
+  DocType?: "dDocument_Items" | "dDocument_Service";
   Quantity: number;
   WarehouseCode: string;
   Bodega?: string;

@@ -71,7 +71,10 @@ export default function BodegaPage() {
                   onChange={() => toggle(r.id)}
                 />
                 <span className="flex-1">
-                  <div className="font-bold">{r.id}</div>
+                  <div className="font-bold">
+                    {r.id}
+                    {r.clase === "servicio" ? " · Servicio" : ""}
+                  </div>
                   <div className="text-sm text-muted">
                     {r.empresa}
                     {r.bodegaCodigo ? ` · bod ${r.bodegaCodigo}` : ""}

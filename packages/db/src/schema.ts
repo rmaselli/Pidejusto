@@ -204,6 +204,8 @@ export const solicitudes = pgTable("solicitudes", {
   bud: jsonb("bud").notNull(),
   requiredDate: varchar("required_date", { length: 16 }).notNull(),
   comentario: text("comentario").default(""),
+  /** articulo = ítem de inventario; servicio = línea libre de SAP B1. */
+  clase: varchar("clase", { length: 16 }).notNull().default("articulo"),
   bodegaCodigo: varchar("bodega_codigo", { length: 32 }).notNull().default(""),
   tipoDocumento: varchar("tipo_documento", { length: 32 }).notNull().default("SC"),
   docNum: varchar("doc_num", { length: 64 }),

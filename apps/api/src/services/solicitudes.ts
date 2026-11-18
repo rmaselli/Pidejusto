@@ -29,10 +29,12 @@ import {
   filasPost,
   nextEstadoAfterApprove,
   nivelDeEstado,
+  MAX_LINEAS_SOLICITUD,
   pad,
   rutaConNivelesActivos,
   rutaDe,
   sugerida,
+  type ClaseSolicitud,
   type ContableImputacion,
   type LineaSolicitud,
   type SolicitudEstado,
@@ -198,15 +200,125 @@ export async function previewLine(
   return { line, alerta: al, mm, base, consumo, stock, centros: centers, ctaName: ctx.cta };
 }
 
+function bad(message: string, status = 400) {
+  return Object.assign(new Error(message), { status });
+}
+
+function mayus(value: unknown) {
+  return String(value || "").trim().toLocaleUpperCase("es");
+}
+
+async function buildServiceLine(
+  db: Db,
+  empresa: string,
+  input: {
+    descripcion?: string;
+    qty?: number;
+    price?: number;
+    cuenta?: string;
+    proyecto?: string;
+    d1?: string;
+    d2?: string;
+    d3?: string;
+    d4?: string;
+    d5?: string;
+    placa?: string;
+    obraProc?: string;
+    obraEsp?: string;
+  },
+): Promise<LineaSolicitud> {
+  const descripcion = mayus(input.descripcion);
+  const placa = mayus(input.placa);
+  const obraProc = mayus(input.obraProc);
+  const obraEsp = mayus(input.obraEsp);
+  const qty = Number(input.qty);
+  const price = Number(input.price);
+  const cuenta = String(input.cuenta || "").trim();
+  const proyecto = String(input.proyecto || "").trim();
+  const d1 = String(input.d1 || "").trim();
+  const d2 = String(input.d2 || "").trim();
+  const d3 = String(input.d3 || "").trim();
+  const d4 = String(input.d4 || "").trim();
+  const d5 = String(input.d5 || "").trim();
+  if (!descripcion) throw bad("Indique la descripción del servicio");
+  if (!(qty > 0)) throw bad("La cantidad del servicio debe ser mayor a cero");
+  if (!(price > 0)) throw bad("Indique el precio unitario del servicio");
+  if (!cuenta || !proyecto || !d1 || !d2 || !d3 || !d4 || !d5) {
+    throw bad("Complete cuenta de mayor, proyecto y las dimensiones del servicio");
+  }
+
+  const ctx = await getContableContext(db, empresa);
+  const row =
+    ctx.mcx.find(
+      (r) =>
+        r[1] === cuenta[0] &&
+        r[2] === d1 &&
+        r[3] === d2 &&
+        r[4] === d3 &&
+        r[5] === d4 &&
+        r[6] === d5 &&
+        r[7] === proyecto,
+    ) || null;
+  if (!row) throw bad("La combinación contable no existe en la matriz de SAP");
+
+  const cat = ctx.catcta.find((c) => c.cuenta6 === cuenta || c.cuenta7 === cuenta);
+  const ct = contableFrom(
+    cuenta,
+    row,
+    {
+      detalle: descripcion,
+      placa,
+      obraProc,
+      obraEsp,
+    },
+    ctx.keys,
+    ctx.anexo,
+    !!cat?.requierePlaca,
+    !!cat?.requiereObra || cuenta.startsWith("1210"),
+  );
+  if (!ct.ok) throw bad(ct.validacion || "Imputación contable inválida");
+
+  return {
+    emp: empresa,
+    code: "",
+    name: descripcion,
+    cat: "Servicio",
+    clase: "servicio",
+    qty,
+    price,
+    total: +(qty * price).toFixed(2),
+    sug: qty,
+    alerta: "Servicio",
+    just: "",
+    disp: 0,
+    min: 0,
+    max: 0,
+    ct,
+  };
+}
+
 export async function createSolicitud(
   db: Db,
   user: UserInfo,
   body: {
+    clase?: "articulo" | "servicio";
     lines: {
-      itemCode: string;
+      itemCode?: string;
       qty: number;
       justificacion?: string;
       contable?: Partial<ContableImputacion>;
+      descripcion?: string;
+      price?: number;
+      cuenta?: string;
+      proyecto?: string;
+      d1?: string;
+      d2?: string;
+      d3?: string;
+      d4?: string;
+      d5?: string;
+      placa?: string;
+      obraProc?: string;
+      obraEsp?: string;
     }[];
     requiredDate: string;
     comentario?: string;
@@ -219,6 +331,10 @@ export async function createSolicitud(
     throw Object.assign(new Error("Solo solicitantes pueden crear"), { status: 403 });
   }
   if (!body.lines?.length) throw Object.assign(new Error("Sin líneas"), { status: 400 });
+  if (body.lines.length > MAX_LINEAS_SOLICITUD) {
+    throw bad(`Máximo ${MAX_LINEAS_SOLICITUD} líneas por solicitud`);
+  }
+  const clase = body.clase === "servicio" ? "servicio" : "articulo";
 
   const empresa =
     user.emp === "TODAS" ? String(body.empresa || "").trim() : user.emp;
@@ -235,14 +351,19 @@ export async function createSolicitud(
   );
   const built: LineaSolicitud[] = [];
   for (const l of body.lines) {
+    if (clase === "servicio") {
+      built.push(await buildServiceLine(db, empresa, l));
+      continue;
+    }
+    const justificacion = mayus(l.justificacion);
     const prev = await previewLine(db, {
       empresa,
-      itemCode: l.itemCode,
+      itemCode: String(l.itemCode || ""),
       qty: l.qty,
-      justificacion: l.justificacion,
+      justificacion,
       contable: l.contable,
     });
-    if (prev.alerta.exige && !String(l.justificacion || "").trim() && l.qty !== prev.line.sug) {
+    if (prev.alerta.exige && !justificacion && l.qty !== prev.line.sug) {
       throw Object.assign(
         new Error(`Línea ${l.itemCode}: ${prev.alerta.msg}`),
         { status: 400 },
@@ -254,7 +375,7 @@ export async function createSolicitud(
         { status: 400 },
       );
     }
-    built.push({ ...prev.line, just: l.justificacion || prev.line.just });
+    built.push({ ...prev.line, just: justificacion || mayus(prev.line.just) });
   }
 
   const open = await loadOpenReqs(db);
@@ -330,7 +451,8 @@ export async function createSolicitud(
     ruta,
     bud,
     requiredDate: body.requiredDate,
-    comentario: body.comentario || "",
+    comentario: mayus(body.comentario),
+    clase,
     bodegaCodigo: doc.bodega,
     tipoDocumento: doc.tipo,
     docNum: doc.docNum,
@@ -371,7 +493,7 @@ export async function createSolicitud(
     solicitudId: id,
     userName: user.nombre,
     accion: "Creó solicitud",
-    detalle: `${built.length} línea(s) · ${ruta.regla} · ${doc.tipo} ${doc.docNum} · bodega ${doc.bodega}`,
+    detalle: `${built.length} línea(s) · ${clase} · ${ruta.regla} · ${doc.tipo} ${doc.docNum} · bodega ${doc.bodega}`,
   });
 
   return getSolicitud(db, id);
@@ -405,6 +527,7 @@ export async function getSolicitud(db: Db, id: string) {
       disp: l.disp || 0,
       min: l.min || 0,
       max: l.max || 0,
+      clase: (req.clase === "servicio" ? "servicio" : "articulo") as ClaseSolicitud,
       ct: l.contable as ContableImputacion,
     })),
     bit: bit.map((b) => ({
@@ -514,7 +637,7 @@ export async function aprobarSolicitud(
     solicitudId: id,
     userName: user.nombre,
     accion: `Aprobó ${nivel}`,
-    detalle: comentario || "",
+    detalle: mayus(comentario),
   });
 
   const siguiente = nivelDeEstado(next);
@@ -537,7 +660,8 @@ export async function rechazarSolicitud(
   id: string,
   comentario: string,
 ) {
-  if (!String(comentario || "").trim()) {
+  const motivo = mayus(comentario);
+  if (!motivo) {
     throw Object.assign(new Error("Rechazar exige un comentario"), { status: 400 });
   }
   const req = await getSolicitud(db, id);
@@ -561,7 +685,7 @@ export async function rechazarSolicitud(
     solicitudId: id,
     userName: user.nombre,
     accion: `Rechazó ${nivel}`,
-    detalle: comentario,
+    detalle: motivo,
   });
   return getSolicitud(db, id);
 }
@@ -603,7 +727,10 @@ export async function enviarASAP(
       docNum: r.docNum || "",
       companyDb: r.companyDb || "",
       requiredDate: r.requiredDate,
-      lines: r.lines,
+      lines: r.lines.map((l) => ({
+        ...l,
+        clase: r.clase === "servicio" ? ("servicio" as const) : ("articulo" as const),
+      })),
     });
   }
 

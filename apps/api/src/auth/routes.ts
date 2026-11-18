@@ -4,7 +4,7 @@ import { users } from "@pidejusto/db";
 import type { Role, UserInfo } from "@pidejusto/shared";
 import { config } from "../config.js";
 import type { Db } from "@pidejusto/db";
-import { requireAuth } from "./middleware.js";
+import { requireAuth, SIN_ROL } from "./middleware.js";
 import crypto from "crypto";
 
 function toUserInfo(u: typeof users.$inferSelect): UserInfo {
@@ -21,8 +21,22 @@ function toUserInfo(u: typeof users.$inferSelect): UserInfo {
 export function authRoutes(db: Db) {
   const r = Router();
 
-  r.get("/me", (req, res) => {
-    if (!req.session?.user) return res.status(401).json({ user: null });
+  r.get("/me", async (req, res) => {
+    // Sin sesión: 200 con user=null para que la web sepa el authMode y muestre el login correcto
+    if (!req.session?.user) return res.json({ user: null, authMode: config.authMode });
+    // Refresca desde la BD: si un Admin asignó o cambió el rol (o desactivó al
+    // usuario), se aplica sin tener que volver a iniciar sesión.
+    const [u] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.session.user.id))
+      .limit(1);
+    if (!u || !u.activo) {
+      return req.session.destroy(() =>
+        res.json({ user: null, authMode: config.authMode }),
+      );
+    }
+    req.session.user = toUserInfo(u);
     return res.json({ user: req.session.user, authMode: config.authMode });
   });
 
@@ -48,9 +62,17 @@ export function authRoutes(db: Db) {
   });
 
   r.post("/logout", (req, res) => {
+    // En modo azure, además de cerrar la sesión local se cierra la de Microsoft
+    let logoutUrl: string | undefined;
+    if (config.authMode === "azure" && config.azure.tenantId) {
+      const params = new URLSearchParams({
+        post_logout_redirect_uri: `${config.webUrl}/login`,
+      });
+      logoutUrl = `https://login.microsoftonline.com/${config.azure.tenantId}/oauth2/v2.0/logout?${params}`;
+    }
     req.session.destroy(() => {
-      res.clearCookie("connect.sid");
-      res.json({ ok: true });
+      res.clearCookie("pj.sid", { path: "/", httpOnly: true, sameSite: "lax" });
+      res.json({ ok: true, logoutUrl });
     });
   });
 
@@ -125,18 +147,30 @@ export function authRoutes(db: Db) {
       mail?: string;
       userPrincipalName?: string;
     };
-    const email = (me.mail || me.userPrincipalName || "").toLowerCase();
-    if (!email) return res.status(400).send("La cuenta MS365 no tiene email");
+    // Se usa el UserPrincipalName (cuenta de inicio de sesión), no el campo mail
+    const email = (me.userPrincipalName || "").trim().toLowerCase();
+    if (!email) return res.status(400).send("La cuenta MS365 no tiene UserPrincipalName");
 
-    let [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    // 1) Buscar por object id de Entra ID (estable aunque cambie el correo)
+    let [u] = await db.select().from(users).where(eq(users.azureOid, me.id)).limit(1);
+    // 2) Si no está vinculado aún, buscar por email
     if (!u) {
-      // Auto-provision as Solicitante; admin can elevate later
+      [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      if (u?.azureOid && u.azureOid !== me.id) {
+        return res
+          .status(403)
+          .send("El correo ya está vinculado a otra cuenta de Microsoft. Contacte al administrador.");
+      }
+    }
+    if (!u) {
+      // Auto-registro SIN rol: un Admin lo asigna en /admin/usuarios.
+      // Mientras tanto el usuario no tiene acceso a ninguna función.
       const id = `MS-${me.id.slice(0, 8)}`;
       await db.insert(users).values({
         id,
         email,
         nombre: me.displayName || email,
-        rol: "Solicitante",
+        rol: SIN_ROL,
         empresa: "SUPREMA",
         puesto: "Usuario MS365",
         azureOid: me.id,
@@ -145,6 +179,7 @@ export function authRoutes(db: Db) {
       [u] = await db.select().from(users).where(eq(users.id, id)).limit(1);
     } else if (!u.azureOid) {
       await db.update(users).set({ azureOid: me.id }).where(eq(users.id, u.id));
+      u = { ...u, azureOid: me.id };
     }
 
     if (!u || !u.activo) return res.status(403).send("Usuario inactivo");

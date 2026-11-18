@@ -14,6 +14,19 @@ export function fFecha(value: string | Date | null | undefined) {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${p(d.getFullYear() % 100)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+export function dimsLinea(ct?: Record<string, unknown> | null) {
+  if (!ct) return "";
+  const s = (k: string) => (typeof ct[k] === "string" ? (ct[k] as string) : "");
+  const dep = s("depN") && s("subN") ? `${s("depN")} / ${s("subN")}` : s("depN") || s("subN");
+  return [s("cta") ? `Cuenta ${s("cta")}` : "", s("proyN"), dep, s("ubiN"), s("linN"), s("prodN")]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function mayus(value: string) {
+  return value.toLocaleUpperCase("es");
+}
+
 export function fQ(n: number) {
   return (
     "Q " +

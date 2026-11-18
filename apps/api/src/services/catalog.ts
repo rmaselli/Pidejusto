@@ -1,4 +1,4 @@
-import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@pidejusto/db";
 import {
   articulos,
@@ -12,6 +12,8 @@ import {
   matrizContable,
   nivelesAprobacion,
   parametros,
+  solicitudLineas,
+  solicitudes,
 } from "@pidejusto/db";
 import {
   calcMinMax,
@@ -108,6 +110,52 @@ export async function getArticuloDetalle(
     mm,
     disponible: disponible(stock),
     params,
+  };
+}
+
+/** Precios con los que ese código ya se pidió. El promedio SAP sigue en el artículo. */
+export async function historialPrecioCompra(db: Db, empresa: string, itemCode: string) {
+  const [art] = await db
+    .select({ precioProm: articulos.precioProm })
+    .from(articulos)
+    .where(and(eq(articulos.empresa, empresa), eq(articulos.itemCode, itemCode)))
+    .limit(1);
+  if (!art) return null;
+
+  const rows = await db
+    .select({
+      precio: solicitudLineas.price,
+      qty: solicitudLineas.qty,
+      total: solicitudLineas.total,
+      solicitudId: solicitudes.id,
+      docNum: solicitudes.docNum,
+      estado: solicitudes.estado,
+      fecha: solicitudes.createdAt,
+    })
+    .from(solicitudLineas)
+    .innerJoin(solicitudes, eq(solicitudLineas.solicitudId, solicitudes.id))
+    .where(
+      and(
+        eq(solicitudLineas.empresa, empresa),
+        eq(solicitudLineas.itemCode, itemCode),
+        ne(solicitudes.estado, "Rechazada"),
+        ne(solicitudes.clase, "servicio"),
+      ),
+    )
+    .orderBy(desc(solicitudes.createdAt))
+    .limit(15);
+
+  return {
+    precioProm: art.precioProm,
+    items: rows.map((r) => ({
+      precio: r.precio,
+      qty: r.qty,
+      total: r.total,
+      solicitudId: r.solicitudId,
+      docNum: r.docNum,
+      estado: r.estado,
+      fecha: r.fecha ? r.fecha.toISOString() : null,
+    })),
   };
 }
 

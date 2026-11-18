@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type Solicitud, type SolicitudListItem } from "@/lib/api";
 import { Badge, Card } from "@/components/ui/card";
-import { fFecha, fQ } from "@/lib/utils";
+import { dimsLinea, fFecha, fQ } from "@/lib/utils";
 
 const STEPS = ["Pendiente N1", "Pendiente N2", "Pendiente N3", "Aprobada", "Enviada a SAP"];
 
@@ -28,7 +28,10 @@ export default function SeguimientoPage() {
             <Card>
               <div className="flex justify-between">
                 <div>
-                  <div className="font-bold">{r.id}</div>
+                  <div className="font-bold">
+                    {r.id}{" "}
+                    <Badge>{r.clase === "servicio" ? "Servicio" : "Artículo"}</Badge>
+                  </div>
                   <div className="text-sm text-muted">
                     {r.empresa}
                     {r.bodegaCodigo ? ` · bod ${r.bodegaCodigo}` : ""}
@@ -78,6 +81,20 @@ export default function SeguimientoPage() {
                 </div>
               );
             })}
+          </div>
+          <div className="mt-4 space-y-2">
+            {sel.lines.map((l, i) => (
+              <div key={i} className="rounded-xl border border-line p-3 text-sm">
+                <div className="font-semibold">{l.name}</div>
+                {l.code && <div className="text-xs text-muted">{l.code}</div>}
+                <div className="text-muted">
+                  {l.qty} × {fQ(l.price || 0)} = {fQ(l.total)}
+                </div>
+                {l.cat === "Servicio" && (
+                  <div className="mt-1 text-xs text-muted">{dimsLinea(l.ct)}</div>
+                )}
+              </div>
+            ))}
           </div>
           <div className="mt-4 border-l-2 border-line pl-3 text-sm">
             {sel.bit.map((b, i) => (

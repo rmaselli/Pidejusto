@@ -177,6 +177,11 @@ export default function AdminUsuariosPage() {
                 value={u.rol}
                 onChange={(e) => patchRow(u.id, { rol: e.target.value })}
               >
+                {!u.rol && (
+                  <option value="" disabled>
+                    — Sin rol (pendiente) —
+                  </option>
+                )}
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
                     {r}

@@ -140,6 +140,7 @@ export function createHttpProvider(): SapProvider {
           row.WarehouseCode,
           row.DocNum || "",
           row.ObjetoSap || "PurchaseRequests",
+          row.DocType || "",
         ].join("|");
         const list = groups.get(key) || [];
         list.push(row);
@@ -154,22 +155,32 @@ export function createHttpProvider(): SapProvider {
           opts?.companyDbByEmpresa?.[head.Empresa] ||
           config.sap.companyDb;
         const objeto = head.ObjetoSap || "PurchaseRequests";
+        const service = head.DocType === "dDocument_Service";
         const body = {
+          DocType: service ? "dDocument_Service" : "dDocument_Items",
           DocDate: head.DocDate,
           RequriedDate: head.RequiredDate,
           Comments: head.Comments,
-          DocumentLines: empRows.map((x) => ({
-            ItemCode: x.ItemCode,
-            Quantity: x.Quantity,
-            WarehouseCode: x.WarehouseCode,
-            AccountCode: x.AccountCode,
-            CostingCode: x.CostingCode,
-            CostingCode2: x.CostingCode2,
-            CostingCode3: x.CostingCode3,
-            CostingCode4: x.CostingCode4,
-            CostingCode5: x.CostingCode5,
-            ProjectCode: x.ProjectCode,
-          })),
+          DocumentLines: empRows.map((x) => {
+            const line: Record<string, unknown> = {
+              Quantity: x.Quantity,
+              AccountCode: x.AccountCode,
+              CostingCode: x.CostingCode,
+              CostingCode2: x.CostingCode2,
+              CostingCode3: x.CostingCode3,
+              CostingCode4: x.CostingCode4,
+              CostingCode5: x.CostingCode5,
+              ProjectCode: x.ProjectCode,
+            };
+            if (service) {
+              line.ItemDescription = x.ItemDescription;
+              if (x.UnitPrice_Q) line.UnitPrice = x.UnitPrice_Q;
+            } else {
+              line.ItemCode = x.ItemCode;
+              line.WarehouseCode = x.WarehouseCode;
+            }
+            return line;
+          }),
         };
         const j = (await slFetch(
           objeto,

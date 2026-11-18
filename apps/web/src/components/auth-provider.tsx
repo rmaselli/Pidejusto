@@ -41,7 +41,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const logout = async () => {
-    await api.logout();
+    const r = await api.logout();
+    if (r.logoutUrl) {
+      // Cierra también la sesión de Microsoft; vuelve a /login al terminar
+      window.location.assign(r.logoutUrl);
+      return;
+    }
     setUser(null);
   };
 

@@ -53,7 +53,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ userId }),
     }),
-  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+  logout: () =>
+    request<{ ok: boolean; logoutUrl?: string }>("/auth/logout", { method: "POST" }),
   articulos: (empresa: string, q?: string) =>
     request<{ items: Articulo[] }>(
       `/api/catalog/articulos?empresa=${encodeURIComponent(empresa)}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
@@ -62,11 +63,15 @@ export const api = {
     request<ArticuloDetalle>(
       `/api/catalog/articulos/${encodeURIComponent(empresa)}/${encodeURIComponent(code)}`,
     ),
+  precios: (empresa: string, code: string) =>
+    request<{ precioProm: number; items: PrecioCompra[] }>(
+      `/api/catalog/articulos/${encodeURIComponent(empresa)}/${encodeURIComponent(code)}/precios`,
+    ),
   contable: (empresa: string) =>
     request<{
       anexo: string;
       cta: { codigo: string; nombre: string }[];
-      catcta: unknown[];
+      catcta: CategoriaCuenta[];
       centros: string[][];
     }>(`/api/catalog/contable/${encodeURIComponent(empresa)}`),
   previewLine: (body: unknown) =>
@@ -279,6 +284,24 @@ export type Articulo = {
   precioProm: number;
 };
 
+export type PrecioCompra = {
+  precio: number;
+  qty: number;
+  total: number;
+  solicitudId: string;
+  docNum: string | null;
+  estado: string;
+  fecha: string | null;
+};
+
+export type CategoriaCuenta = {
+  categoria: string;
+  cuenta6: string | null;
+  cuenta7: string | null;
+  requierePlaca: boolean;
+  requiereObra: boolean;
+};
+
 export type ArticuloDetalle = {
   art: Articulo & { leadTimeDias: number; codigoCorporativo?: string };
   stock: { ex: number; ped: number; com: number };
@@ -322,6 +345,7 @@ export type SolicitudListItem = {
   dentroPresupuesto: boolean;
   requiredDate: string;
   createdAt?: string;
+  clase?: string;
 };
 
 export type Solicitud = SolicitudListItem & {
@@ -330,11 +354,23 @@ export type Solicitud = SolicitudListItem & {
     name: string;
     cat: string;
     qty: number;
+    price?: number;
     sug: number;
     alerta: string;
     total: number;
     just: string;
-    ct: { cta: string; ok: boolean; validacion: string; depN?: string; subN?: string };
+    clase?: string;
+    ct: {
+      cta: string;
+      ok: boolean;
+      validacion: string;
+      depN?: string;
+      subN?: string;
+      proyN?: string;
+      ubiN?: string;
+      linN?: string;
+      prodN?: string;
+    };
   }[];
   bit: { ts: string; user: string; accion: string; detalle: string }[];
   ruta: { regla: string; niveles: string; desc: string };

@@ -17,6 +17,7 @@ import { config } from "../config.js";
 import {
   getArticuloDetalle,
   getContableContext,
+  historialPrecioCompra,
   listEmpresas,
   listNiveles,
   listReglasAprobacion,
@@ -85,6 +86,20 @@ export function apiRoutes(db: Db, sap: SapProvider) {
       const q = req.query.q ? String(req.query.q) : undefined;
       const items = await searchArticulos(db, { empresa, q });
       res.json({ items });
+    }),
+  );
+
+  r.get(
+    "/catalog/articulos/:empresa/:code/precios",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const hist = await historialPrecioCompra(
+        db,
+        req.params.empresa,
+        req.params.code,
+      );
+      if (!hist) return res.status(404).json({ error: "No encontrado" });
+      res.json(hist);
     }),
   );
 

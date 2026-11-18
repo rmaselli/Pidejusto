@@ -77,7 +77,7 @@ const NAV: { href: string; label: string; icon: LucideIcon; roles: string[] }[] 
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, refresh } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -104,7 +104,43 @@ export function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (pathname === "/login" || pathname.startsWith("/m")) {
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
+
+  // Usuario auto-registrado desde MS365 sin rol: espera a que un Admin lo asigne
+  if (user && !user.rol) {
+    return (
+      <div className="grid min-h-screen place-items-center px-4">
+        <div className="w-full max-w-md rounded-2xl border border-line bg-white p-8 text-center shadow-sm">
+          <h1 className="font-display text-xl font-bold">Acceso pendiente</h1>
+          <p className="mt-3 text-sm text-muted">
+            Hola <b>{user.nombre}</b>. Tu cuenta ({user.email}) ya está registrada, pero
+            aún no tiene un rol asignado. Un administrador de PideJusto debe asignarte
+            uno para que puedas usar el sistema.
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button
+              type="button"
+              className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => void refresh()}
+            >
+              Volver a verificar
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-line px-4 py-2 text-sm font-semibold"
+              onClick={() => void logout().then(() => router.push("/login"))}
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (pathname.startsWith("/m")) {
     return <>{children}</>;
   }
 

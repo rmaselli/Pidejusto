@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, type Solicitud } from "@/lib/api";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fFecha, fQ } from "@/lib/utils";
+import { dimsLinea, fFecha, fQ, mayus } from "@/lib/utils";
 
 export default function MobileDetalle() {
   const { id } = useParams<{ id: string }>();
@@ -57,9 +57,15 @@ export default function MobileDetalle() {
       {req.lines.map((l, i) => (
         <div key={i} className="rounded-[20px] border border-line bg-card p-4 text-sm">
           <div className="font-bold">{l.name}</div>
+          {l.code && <div className="text-xs text-muted">{l.code}</div>}
           <div className="text-muted">
-            {l.qty} · sug {l.sug} · {fQ(l.total)}
+            {l.cat === "Servicio"
+              ? `${l.qty} × ${fQ(l.price || 0)} · ${fQ(l.total)}`
+              : `${l.qty} · sug ${l.sug} · ${fQ(l.total)}`}
           </div>
+          {l.cat === "Servicio" && (
+            <div className="mt-1 text-xs text-muted">{dimsLinea(l.ct)}</div>
+          )}
           <div className="mt-2 flex flex-wrap gap-1">
             <Badge tone={l.alerta === "En rango" ? "ok" : "warn"}>{l.alerta}</Badge>
             <Badge tone={l.ct.ok ? "ok" : "bad"}>{l.ct.validacion}</Badge>
@@ -128,12 +134,12 @@ export default function MobileDetalle() {
               {ask === "aprobar" ? "Confirmar aprobación" : "Confirmar rechazo"}
             </h3>
             <textarea
-              className="mt-3 w-full rounded-xl border border-line p-3"
+              className="mt-3 w-full rounded-xl border border-line p-3 uppercase"
               placeholder={
                 ask === "aprobar" ? "Comentario opcional" : "Motivo del rechazo"
               }
               value={comentario}
-              onChange={(e) => setComentario(e.target.value)}
+              onChange={(e) => setComentario(mayus(e.target.value))}
             />
             <div className="mt-3 flex gap-2">
               <Button className="flex-1" onClick={() => setAsk(null)}>

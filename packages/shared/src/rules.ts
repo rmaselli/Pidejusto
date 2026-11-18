@@ -413,6 +413,7 @@ export interface ConsolidaLine {
   objetoSap: string;
   code: string;
   name: string;
+  clase?: "articulo" | "servicio";
   qty: number;
   price: number;
   total: number;
@@ -438,12 +439,14 @@ export function consolidar(
   const map = new Map<string, ConsolidaLine>();
   for (const r of reqs) {
     for (const l of r.lines) {
+      const servicio = l.clase ? l.clase === "servicio" : !l.code;
+      const identity = servicio ? `SRV:${l.name}:${l.price}` : l.code;
       const key = [
         r.emp,
         r.bodega || "",
         r.tipoDocumento || "",
         r.docNum || "",
-        l.code,
+        identity,
         l.ct.cta,
         l.ct.d1,
         l.ct.d2,
@@ -462,8 +465,9 @@ export function consolidar(
           docNum: r.docNum || "",
           companyDb: r.companyDb || "",
           objetoSap: r.objetoSap || "PurchaseRequests",
-          code: l.code,
+          code: servicio ? "" : l.code,
           name: l.name,
+          clase: servicio ? "servicio" : "articulo",
           qty: l.qty,
           price: l.price,
           total: l.total,
@@ -495,8 +499,9 @@ export function filasPost(
     RequiredDate: c.requiredDate,
     Requester: requester,
     Empresa: c.emp,
-    ItemCode: c.code,
+    ItemCode: c.clase === "servicio" ? "" : c.code,
     ItemDescription: c.name,
+    DocType: c.clase === "servicio" ? "dDocument_Service" : "dDocument_Items",
     Quantity: c.qty,
     WarehouseCode: c.warehouseCode || c.bodega || c.emp,
     Bodega: c.bodega,
