@@ -159,22 +159,12 @@ export async function previewLine(
 
   const ctx = await getContableContext(db, input.empresa);
   const cat = ctx.catcta.find((c) => c.categoria === art.categoria);
-  const prefer6 = ctx.mcx.some((r) => r[1] === "6");
-  const defaultCta =
-    input.contable?.cta ||
-    (prefer6 ? cat?.cuenta6 : cat?.cuenta7) ||
-    cat?.cuenta6 ||
-    cat?.cuenta7 ||
-    "";
-  const centers = ctx.mcx.filter((r) => r[1] === String(defaultCta)[0]);
-  const row = centers[0] || null;
+  const defaultCta = input.contable?.cta || cat?.cuenta6 || cat?.cuenta7 || "";
   const requirePlaca = !!cat?.requierePlaca;
   const ct = contableFrom(
     defaultCta,
-    row,
+    null,
     input.contable || {},
-    ctx.keys,
-    ctx.anexo,
     requirePlaca,
     !!cat?.requiereObra || String(defaultCta).startsWith("1210"),
   );
@@ -197,7 +187,7 @@ export async function previewLine(
     ct,
   };
 
-  return { line, alerta: al, mm, base, consumo, stock, centros: centers, ctaName: ctx.cta };
+  return { line, alerta: al, mm, base, consumo, stock, ctaName: ctx.cta };
 }
 
 function bad(message: string, status = 400) {
@@ -225,6 +215,12 @@ async function buildServiceLine(
     placa?: string;
     obraProc?: string;
     obraEsp?: string;
+    depN?: string;
+    subN?: string;
+    ubiN?: string;
+    linN?: string;
+    prodN?: string;
+    proyN?: string;
   },
 ): Promise<LineaSolicitud> {
   const descripcion = mayus(input.descripcion);
@@ -248,31 +244,31 @@ async function buildServiceLine(
   }
 
   const ctx = await getContableContext(db, empresa);
-  const row =
-    ctx.mcx.find(
-      (r) =>
-        r[1] === cuenta[0] &&
-        r[2] === d1 &&
-        r[3] === d2 &&
-        r[4] === d3 &&
-        r[5] === d4 &&
-        r[6] === d5 &&
-        r[7] === proyecto,
-    ) || null;
-  if (!row) throw bad("La combinación contable no existe en la matriz de SAP");
-
   const cat = ctx.catcta.find((c) => c.cuenta6 === cuenta || c.cuenta7 === cuenta);
   const ct = contableFrom(
     cuenta,
-    row,
+    [
+      "",
+      cuenta[0] || "",
+      d1,
+      d2,
+      d3,
+      d4,
+      d5,
+      proyecto,
+      mayus(input.depN) || d1,
+      mayus(input.subN) || d2,
+      mayus(input.ubiN) || d3,
+      mayus(input.linN) || d4,
+      mayus(input.prodN) || d5,
+      mayus(input.proyN) || proyecto,
+    ],
     {
       detalle: descripcion,
       placa,
       obraProc,
       obraEsp,
     },
-    ctx.keys,
-    ctx.anexo,
     !!cat?.requierePlaca,
     !!cat?.requiereObra || cuenta.startsWith("1210"),
   );
@@ -319,6 +315,12 @@ export async function createSolicitud(
       placa?: string;
       obraProc?: string;
       obraEsp?: string;
+      depN?: string;
+      subN?: string;
+      ubiN?: string;
+      linN?: string;
+      prodN?: string;
+      proyN?: string;
     }[];
     requiredDate: string;
     comentario?: string;

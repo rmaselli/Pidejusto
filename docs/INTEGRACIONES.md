@@ -33,7 +33,7 @@ Puerto desacoplado (`SapProvider`):
 | `existencias` | `existencias` | `Items?...ItemWarehouseInfoCollection` |
 | `consumo` | `consumo_trimestral` | `SQLQueries('ConsumoTrimestral')/List` |
 | `presupuesto` | params + ejecución | `BudgetScenarios` |
-| `contable` | cuentas + matriz | `ChartOfAccounts` |
+| `contable` | cuentas y categoría | `ChartOfAccounts` |
 | `matriz` | `matriz_aprobacion` | `ApprovalTemplates` |
 | `postSolicitudCompra` | `sap_post_lines` + DocNum | `POST /b1s/v2/PurchaseRequests` |
 
@@ -51,6 +51,23 @@ SAP_TIMEOUT_MS=15000
 La URL puede estar en construcción: las peticiones están implementadas. Si el upstream no responde, la API devuelve **503** con código `SapUpstreamUnavailable` y el resto de la app sigue operativa con maestros locales.
 
 Estado en vivo: `GET /api/sap/status` (autenticado).
+
+## Pasarela SAP (búsqueda de artículos)
+
+`/solicitar` busca artículos con `GET /api/v1/odata/Items` de la pasarela (`$select=ItemCode,ItemName,ForeignName`, `$filter` con `startswith` / `substringof`, `$top`). La API key queda en el servidor.
+
+```env
+SAP_GATEWAY_URL=https://sapgateway.grupomeme.com.gt
+SAP_GATEWAY_KEY=spk_live_...
+# Código X-Company que IT habilitó. Si se omite, se envía el código de la empresa de PideJusto.
+SAP_GATEWAY_COMPANY=
+# O un mapa: SUPREMA=CODIGO_SAP,PALMAS=OTRO
+SAP_GATEWAY_COMPANIES=
+```
+
+También se aceptan `SAP_BASE_URL` y `SAP_BASE_KEY` si no están las variables `SAP_GATEWAY_*`.
+
+En servicio, `/solicitar` pide los combos con `GET /api/catalog/servicio-maestros/:empresa`. La API consulta, por separado, `ChartOfAccounts`, `ProfitCenters` y, por el cambio de SAP B1, `POST ProjectsService_GetProjectList`, `DimensionsService_GetDimensionList` y `DistributionRulesService_GetDistributionRuleList`. Si una entidad no responde, ese combo queda deshabilitado con el aviso; no hay matriz local de respaldo.
 
 ## Claude (Anthropic)
 

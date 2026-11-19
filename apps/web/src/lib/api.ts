@@ -56,7 +56,7 @@ export const api = {
   logout: () =>
     request<{ ok: boolean; logoutUrl?: string }>("/auth/logout", { method: "POST" }),
   articulos: (empresa: string, q?: string) =>
-    request<{ items: Articulo[] }>(
+    request<{ items: Articulo[]; source?: "sap" | "local"; company?: string }>(
       `/api/catalog/articulos?empresa=${encodeURIComponent(empresa)}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     ),
   articulo: (empresa: string, code: string) =>
@@ -72,8 +72,11 @@ export const api = {
       anexo: string;
       cta: { codigo: string; nombre: string }[];
       catcta: CategoriaCuenta[];
-      centros: string[][];
     }>(`/api/catalog/contable/${encodeURIComponent(empresa)}`),
+  servicioMaestros: (empresa: string) =>
+    request<ServicioMaestros>(
+      `/api/catalog/servicio-maestros/${encodeURIComponent(empresa)}`,
+    ),
   previewLine: (body: unknown) =>
     request<PreviewLine>("/api/solicitudes/preview-line", {
       method: "POST",
@@ -294,6 +297,24 @@ export type PrecioCompra = {
   fecha: string | null;
 };
 
+export type SapOpcion = { code: string; name: string; formato?: string };
+
+export type ServicioMaestros = {
+  source: "sap" | "local";
+  company: string | null;
+  cuentas: SapOpcion[];
+  proyectos: SapOpcion[];
+  dimensiones: {
+    n: number;
+    nombre: string;
+    esperado: string;
+    origen: "centros" | "reglas" | "ambos" | "sin-datos";
+    opciones: SapOpcion[];
+  }[];
+  faltantes: { entidad: string; code: string; message: string }[];
+  avisos: string[];
+};
+
 export type CategoriaCuenta = {
   categoria: string;
   cuenta6: string | null;
@@ -328,7 +349,6 @@ export type PreviewLine = {
   };
   alerta: { tipo: string; sug: number; exige: boolean; msg: string };
   mm: { min: number; max: number };
-  centros: string[][];
 };
 
 export type SolicitudListItem = {

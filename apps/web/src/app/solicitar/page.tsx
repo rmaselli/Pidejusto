@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_LINEAS_SOLICITUD } from "@pidejusto/shared";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   type CategoriaCuenta,
   type PrecioCompra,
   type PreviewLine,
+  type ServicioMaestros,
   type TipoDocumento,
 } from "@/lib/api";
 import { dimsLinea, fFecha, fQ, mayus } from "@/lib/utils";
@@ -59,17 +60,16 @@ const fieldCls =
   "mt-1 w-full rounded-xl border border-line bg-card px-3 py-2 text-sm font-medium text-ink";
 const textCls = `${fieldCls} uppercase`;
 
-function distinct(rows: string[][], codeIdx: number, nameIdx: number) {
-  const map = new Map<string, string>();
-  for (const r of rows) {
-    const code = r[codeIdx] || "";
-    if (!code || map.has(code)) continue;
-    map.set(code, r[nameIdx] || code);
-  }
-  return [...map.entries()]
-    .map(([code, name]) => ({ code, name }))
-    .sort((a, b) => a.name.localeCompare(b.name, "es"));
-}
+type CampoEstado = "cargando" | "error" | "vacio" | "listo";
+
+type CampoSap = {
+  label: string;
+  value: string;
+  options: { code: string; name: string; formato?: string }[];
+  estado: CampoEstado;
+  aviso?: string;
+  onChange: (code: string) => void;
+};
 
 function Field({
   label,
@@ -110,13 +110,18 @@ export default function SolicitarPage() {
   const [bodega, setBodega] = useState("");
   const [tipo, setTipo] = useState("SC");
   const [msg, setMsg] = useState("");
+  const [sapMsg, setSapMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [buscando, setBuscando] = useState(false);
+  const buscaId = useRef(0);
   const [svc, setSvc] = useState<SvcForm>(EMPTY_SVC);
-  const [ctaQ, setCtaQ] = useState("");
+  const [maestros, setMaestros] = useState<
+    | { estado: "cargando" }
+    | { estado: "error"; mensaje: string }
+    | { estado: "listo"; data: ServicioMaestros }
+  >({ estado: "cargando" });
   const [contable, setContable] = useState<{
-    cta: { codigo: string; nombre: string }[];
     catcta: CategoriaCuenta[];
-    centros: string[][];
   } | null>(null);
 
   const empresa = user?.emp === "TODAS" ? empresaSel : user?.emp || "";
@@ -146,19 +151,32 @@ export default function SolicitarPage() {
     setCart([]);
     setSelected(null);
     setSvc(EMPTY_SVC);
+    setMaestros({ estado: "cargando" });
   }, [empresa]);
 
   useEffect(() => {
-    if (!user || !empresa || clase !== "articulo") return;
-    void api.articulos(empresa, q).then((r) => setItems(r.items));
-  }, [user, q, empresa, clase]);
-
-  useEffect(() => {
     if (clase !== "servicio" || !empresa) return;
+    let cancel = false;
+    setMaestros({ estado: "cargando" });
     void api
       .contable(empresa)
-      .then((r) => setContable({ cta: r.cta, catcta: r.catcta, centros: r.centros }))
-      .catch((e) => setMsg(e.message));
+      .then((r) => {
+        if (!cancel) setContable({ catcta: r.catcta });
+      })
+      .catch((e) => {
+        if (!cancel) setMsg(e.message);
+      });
+    void api
+      .servicioMaestros(empresa)
+      .then((r) => {
+        if (!cancel) setMaestros({ estado: "listo", data: r });
+      })
+      .catch((e) => {
+        if (!cancel) setMaestros({ estado: "error", mensaje: (e as Error).message });
+      });
+    return () => {
+      cancel = true;
+    };
   }, [clase, empresa]);
 
   useEffect(() => {
@@ -193,68 +211,85 @@ export default function SolicitarPage() {
     };
   }, [selected, empresa, clase]);
 
-  const centros = contable?.centros || [];
-  const byCuenta = useMemo(
-    () => (svc.cuenta ? centros.filter((r) => r[1] === svc.cuenta[0]) : []),
-    [centros, svc.cuenta],
+  const sapCaido = maestros.estado === "error";
+  const sapListo = maestros.estado === "listo" ? maestros.data : null;
+
+  function falta(entidad: string) {
+    return sapListo?.faltantes.some((f) => f.entidad === entidad) ?? false;
+  }
+
+  function campoDe(
+    label: string,
+    value: string,
+    options: CampoSap["options"],
+    entidadCaida: boolean,
+    aviso: string,
+    onChange: (code: string) => void,
+  ): CampoSap {
+    if (maestros.estado === "cargando") {
+      return { label, value: "", options: [], estado: "cargando", onChange };
+    }
+    if (sapCaido) {
+      return { label, value: "", options: [], estado: "error", onChange };
+    }
+    if (entidadCaida) {
+      return { label, value: "", options: [], estado: "error", aviso, onChange };
+    }
+    if (!options.length) {
+      return {
+        label,
+        value: "",
+        options: [],
+        estado: "vacio",
+        aviso: "SAP no tiene registros para esta lista.",
+        onChange,
+      };
+    }
+    return { label, value, options, estado: "listo", onChange };
+  }
+
+  const cuentaCampo = campoDe(
+    "Cuenta de mayor",
+    svc.cuenta,
+    sapListo?.cuentas || [],
+    falta("ChartOfAccounts"),
+    "SAP no devolvió el catálogo de cuentas.",
+    (cuenta) => patchSvc({ cuenta }),
   );
-  const proyectoOpts = useMemo(
-    () => (svc.cuenta ? distinct(byCuenta, 7, 13) : []),
-    [byCuenta, svc.cuenta],
-  );
-  const afterProy = useMemo(
-    () => byCuenta.filter((r) => r[7] === svc.proyecto),
-    [byCuenta, svc.proyecto],
-  );
-  const depOpts = useMemo(
-    () => (svc.proyecto ? distinct(afterProy, 2, 8) : []),
-    [afterProy, svc.proyecto],
-  );
-  const afterDep = useMemo(
-    () => afterProy.filter((r) => r[2] === svc.d1),
-    [afterProy, svc.d1],
-  );
-  const subOpts = useMemo(
-    () => (svc.d1 ? distinct(afterDep, 3, 9) : []),
-    [afterDep, svc.d1],
-  );
-  const afterSub = useMemo(
-    () => afterDep.filter((r) => r[3] === svc.d2),
-    [afterDep, svc.d2],
-  );
-  const locOpts = useMemo(
-    () => (svc.d2 ? distinct(afterSub, 4, 10) : []),
-    [afterSub, svc.d2],
-  );
-  const afterLoc = useMemo(
-    () => afterSub.filter((r) => r[4] === svc.d3),
-    [afterSub, svc.d3],
-  );
-  const linOpts = useMemo(
-    () => (svc.d3 ? distinct(afterLoc, 5, 11) : []),
-    [afterLoc, svc.d3],
-  );
-  const afterLin = useMemo(
-    () => afterLoc.filter((r) => r[5] === svc.d4),
-    [afterLoc, svc.d4],
-  );
-  const prodOpts = useMemo(
-    () => (svc.d4 ? distinct(afterLin, 6, 12) : []),
-    [afterLin, svc.d4],
+  const proyectoCampo = campoDe(
+    "Proyecto",
+    svc.proyecto,
+    sapListo?.proyectos || [],
+    falta("ProjectsService"),
+    "SAP no devolvió los proyectos.",
+    (proyecto) => patchSvc({ proyecto }),
   );
 
-  const cuentas = useMemo(() => {
-    const all = contable?.cta || [];
-    const needle = ctaQ.trim().toLowerCase();
-    const filtered = all.filter(
-      (c) => !needle || `${c.codigo} ${c.nombre}`.toLowerCase().includes(needle),
+  function campoDim(n: number, etiqueta: string, value: string, onChange: (code: string) => void) {
+    const dim = sapListo?.dimensiones.find((d) => d.n === n);
+    const opciones = dim?.opciones || [];
+    const centrosMal = falta("ProfitCenters");
+    const reglasMal = falta("DistributionRulesService");
+    const aviso = centrosMal && reglasMal
+      ? "SAP no devolvió centros ni reglas de distribución."
+      : centrosMal
+        ? "SAP no devolvió los centros de beneficio."
+        : "SAP no devolvió las reglas de distribución.";
+    return campoDe(
+      dim?.nombre || etiqueta,
+      value,
+      opciones,
+      !opciones.length && (centrosMal || reglasMal),
+      aviso,
+      onChange,
     );
-    if (svc.cuenta && !filtered.some((c) => c.codigo === svc.cuenta)) {
-      const current = all.find((c) => c.codigo === svc.cuenta);
-      if (current) return [current, ...filtered];
-    }
-    return filtered;
-  }, [contable, ctaQ, svc.cuenta]);
+  }
+
+  const dep = campoDim(1, "Departamento", svc.d1, (d1) => patchSvc({ d1 }));
+  const sub = campoDim(2, "Sub departamento", svc.d2, (d2) => patchSvc({ d2 }));
+  const loc = campoDim(3, "Localidad", svc.d3, (d3) => patchSvc({ d3 }));
+  const lin = campoDim(4, "Línea de producto", svc.d4, (d4) => patchSvc({ d4 }));
+  const prod = campoDim(5, "Producto", svc.d5, (d5) => patchSvc({ d5 }));
 
   const catMatch = (contable?.catcta || []).filter(
     (c) => c.cuenta6 === svc.cuenta || c.cuenta7 === svc.cuenta,
@@ -271,26 +306,40 @@ export default function SolicitarPage() {
     setMsg("");
   }
 
-  async function searchClaude() {
-    if (!q.trim()) return;
-    setBusy(true);
+  async function buscarArticulos(text: string, announce: boolean) {
+    if (!empresa) return;
+    const id = ++buscaId.current;
+    setBuscando(true);
     try {
-      const r = await api.aiSearch(q);
-      setMsg(`Búsqueda ${r.source}: ${r.items.length} resultado(s)`);
-      if (r.items[0]) {
-        const found = items.find((i) => i.itemCode === r.items[0].itemCode);
-        if (found) setSelected(found);
-        else {
-          const more = await api.articulos(empresa, r.items[0].itemCode);
-          if (more.items[0]) setSelected(more.items[0]);
-        }
-      }
+      const r = await api.articulos(empresa, text);
+      if (id !== buscaId.current) return;
+      setItems(r.items);
+      const origen = r.source === "local" ? "catálogo local" : `SAP ${r.company || empresa}`;
+      setSapMsg(
+        r.items.length
+          ? `${r.items.length} artículo(s) · ${origen}`
+          : `Sin artículos en ${origen}`,
+      );
+      if (announce && r.items.length === 1) setSelected(r.items[0]);
     } catch (e) {
-      setMsg((e as Error).message);
+      if (id !== buscaId.current) return;
+      setItems([]);
+      setSapMsg((e as Error).message);
     } finally {
-      setBusy(false);
+      if (id === buscaId.current) setBuscando(false);
     }
   }
+
+  useEffect(() => {
+    if (!user || !empresa || clase !== "articulo") return;
+    const handle = setTimeout(() => {
+      void buscarArticulos(q, false);
+    }, q.trim() ? 400 : 0);
+    return () => {
+      clearTimeout(handle);
+      buscaId.current += 1;
+    };
+  }, [user, q, empresa, clase]);
 
   function addToCart() {
     if (!preview || !selected) return;
@@ -333,13 +382,18 @@ export default function SolicitarPage() {
       setMsg("Indique el precio unitario");
       return;
     }
-    if (!svc.cuenta || !svc.proyecto || !svc.d1 || !svc.d2 || !svc.d3 || !svc.d4 || !svc.d5) {
-      setMsg("Complete cuenta de mayor, proyecto y las dimensiones");
+    const campos = [cuentaCampo, proyectoCampo, dep, sub, loc, lin, prod];
+    const pendiente = campos.find((c) => c.estado !== "listo");
+    if (pendiente) {
+      setMsg(
+        pendiente.estado === "cargando"
+          ? "Espere la consulta a SAP"
+          : `${pendiente.label}: ${pendiente.aviso || "no disponible"}`,
+      );
       return;
     }
-    const row = afterLin.find((r) => r[6] === svc.d5);
-    if (!row) {
-      setMsg("La combinación contable no existe en la matriz de SAP");
+    if (!svc.cuenta || !svc.proyecto || !svc.d1 || !svc.d2 || !svc.d3 || !svc.d4 || !svc.d5) {
+      setMsg("Complete cuenta de mayor, proyecto y las dimensiones");
       return;
     }
     if (needsPlaca && !svc.placa.trim()) {
@@ -367,18 +421,18 @@ export default function SolicitarPage() {
       max: 0,
       ct: {
         cta: svc.cuenta,
-        d1: row[2],
-        d2: row[3],
-        d3: row[4],
-        d4: row[5],
-        d5: row[6],
-        proy: row[7],
-        depN: row[8],
-        subN: row[9],
-        ubiN: row[10],
-        linN: row[11],
-        prodN: row[12],
-        proyN: row[13],
+        d1: svc.d1,
+        d2: svc.d2,
+        d3: svc.d3,
+        d4: svc.d4,
+        d5: svc.d5,
+        proy: svc.proyecto,
+        depN: nombreDe(dep.options, svc.d1),
+        subN: nombreDe(sub.options, svc.d2),
+        ubiN: nombreDe(loc.options, svc.d3),
+        linN: nombreDe(lin.options, svc.d4),
+        prodN: nombreDe(prod.options, svc.d5),
+        proyN: nombreDe(proyectoCampo.options, svc.proyecto),
         placa: svc.placa,
         obraProc: svc.obraProc,
         obraEsp: svc.obraEsp,
@@ -422,6 +476,12 @@ export default function SolicitarPage() {
                 placa: l.ct.placa,
                 obraProc: l.ct.obraProc,
                 obraEsp: l.ct.obraEsp,
+                depN: l.ct.depN,
+                subN: l.ct.subN,
+                ubiN: l.ct.ubiN,
+                linN: l.ct.linN,
+                prodN: l.ct.prodN,
+                proyN: l.ct.proyN,
               }))
             : cart.map((l) => ({
                 itemCode: l.code,
@@ -538,11 +598,19 @@ export default function SolicitarPage() {
                   placeholder="Buscar código, nombre o familia…"
                   value={q}
                   onChange={(e) => setQ(mayus(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void buscarArticulos(q, true);
+                  }}
                 />
-                <Button variant="claude" onClick={() => void searchClaude()} disabled={busy}>
-                  Buscar en SAP
+                <Button
+                  variant="claude"
+                  onClick={() => void buscarArticulos(q, true)}
+                  disabled={buscando}
+                >
+                  {buscando ? "Buscando…" : "Buscar en SAP"}
                 </Button>
               </div>
+              {sapMsg && <p className="mt-2 text-sm text-brand-800">{sapMsg}</p>}
               <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-line">
                 {items.map((a) => (
                   <button
@@ -709,85 +777,19 @@ export default function SolicitarPage() {
                 />
               </Field>
             </div>
-            <div className="mt-3">
-              <Field label="Buscar cuenta de mayor">
-                <input
-                  className={textCls}
-                  value={ctaQ}
-                  placeholder="Código o nombre"
-                  onChange={(e) => setCtaQ(mayus(e.target.value))}
-                />
-              </Field>
-            </div>
+            {maestros.estado === "error" && (
+              <p className="mt-3 rounded-xl bg-[#F6EBCB] px-3 py-2 text-sm text-[#7a5a08]">
+                {maestros.mensaje}
+              </p>
+            )}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Cuenta de mayor">
-                <select
-                  className={fieldCls}
-                  value={svc.cuenta}
-                  onChange={(e) =>
-                    patchSvc({
-                      cuenta: e.target.value,
-                      proyecto: "",
-                      d1: "",
-                      d2: "",
-                      d3: "",
-                      d4: "",
-                      d5: "",
-                    })
-                  }
-                >
-                  <option value="">Seleccione</option>
-                  {cuentas.map((c) => (
-                    <option key={c.codigo} value={c.codigo}>
-                      {c.codigo} · {c.nombre}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <DimSelect
-                label="Proyecto"
-                value={svc.proyecto}
-                options={proyectoOpts}
-                disabled={!svc.cuenta}
-                onChange={(proyecto) =>
-                  patchSvc({ proyecto, d1: "", d2: "", d3: "", d4: "", d5: "" })
-                }
-              />
-              <DimSelect
-                label="Departamento"
-                value={svc.d1}
-                options={depOpts}
-                disabled={!svc.proyecto}
-                onChange={(d1) => patchSvc({ d1, d2: "", d3: "", d4: "", d5: "" })}
-              />
-              <DimSelect
-                label="Sub departamento"
-                value={svc.d2}
-                options={subOpts}
-                disabled={!svc.d1}
-                onChange={(d2) => patchSvc({ d2, d3: "", d4: "", d5: "" })}
-              />
-              <DimSelect
-                label="Localidad"
-                value={svc.d3}
-                options={locOpts}
-                disabled={!svc.d2}
-                onChange={(d3) => patchSvc({ d3, d4: "", d5: "" })}
-              />
-              <DimSelect
-                label="Línea de producto"
-                value={svc.d4}
-                options={linOpts}
-                disabled={!svc.d3}
-                onChange={(d4) => patchSvc({ d4, d5: "" })}
-              />
-              <DimSelect
-                label="Producto"
-                value={svc.d5}
-                options={prodOpts}
-                disabled={!svc.d4}
-                onChange={(d5) => patchSvc({ d5 })}
-              />
+              <SapSelect campo={cuentaCampo} />
+              <SapSelect campo={proyectoCampo} />
+              <SapSelect campo={dep} />
+              <SapSelect campo={sub} />
+              <SapSelect campo={loc} />
+              <SapSelect campo={lin} />
+              <SapSelect campo={prod} />
             </div>
             {(needsPlaca || needsObra) && (
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -903,34 +905,41 @@ export default function SolicitarPage() {
   );
 }
 
-function DimSelect({
-  label,
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: { code: string; name: string }[];
-  disabled?: boolean;
-  onChange: (code: string) => void;
-}) {
+function nombreDe(options: { code: string; name: string }[], code: string) {
+  return options.find((o) => o.code === code)?.name || code;
+}
+
+function SapSelect({ campo }: { campo: CampoSap }) {
+  const bloqueado = campo.estado !== "listo";
+  const placeholder =
+    campo.estado === "cargando"
+      ? "Consultando SAP…"
+      : campo.estado === "error"
+        ? "No disponible"
+        : campo.estado === "vacio"
+          ? "Sin registros en SAP"
+          : "Seleccione";
   return (
-    <Field label={label}>
+    <label className="block">
+      <span className="text-xs font-bold uppercase text-muted">{campo.label}</span>
       <select
-        className={fieldCls}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
+        className={`${fieldCls} ${bloqueado ? "text-muted" : ""}`}
+        value={bloqueado ? "" : campo.value}
+        disabled={bloqueado}
+        onChange={(e) => campo.onChange(e.target.value)}
       >
-        <option value="">{disabled ? "—" : "Seleccione"}</option>
-        {options.map((o) => (
-          <option key={o.code} value={o.code}>
-            {o.name} · {o.code}
-          </option>
-        ))}
+        <option value="">{placeholder}</option>
+        {campo.estado === "listo" &&
+          campo.options.map((o) => (
+            <option key={o.code} value={o.code}>
+              {(o.formato && o.formato !== o.code ? `${o.formato} · ` : "") +
+                `${o.name} · ${o.code}`}
+            </option>
+          ))}
       </select>
-    </Field>
+      {bloqueado && campo.aviso && (
+        <span className="mt-1 block text-xs font-medium text-[#7a5a08]">{campo.aviso}</span>
+      )}
+    </label>
   );
 }

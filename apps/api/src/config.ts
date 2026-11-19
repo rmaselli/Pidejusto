@@ -31,6 +31,40 @@ export const config = {
     password: process.env.SAP_PASSWORD || "",
     timeoutMs: Number(process.env.SAP_TIMEOUT_MS || 15000),
   },
+  /** Pasarela SAP (docs/clientes_sap.md). La API key no sale del servidor. */
+  gateway: {
+    baseUrl: normalizeGatewayUrl(
+      process.env.SAP_GATEWAY_URL || process.env.SAP_BASE_URL || "",
+    ),
+    apiKey:
+      process.env.SAP_GATEWAY_KEY ||
+      process.env.SAP_BASE_KEY ||
+      process.env.SGW_KEY ||
+      "",
+    /** Un código X-Company para todas las empresas, si IT asignó uno solo. */
+    company: (process.env.SAP_GATEWAY_COMPANY || "").trim(),
+    /** Mapa codigoApp=codigoGateway, separado por comas. */
+    companies: parseCompanyMap(process.env.SAP_GATEWAY_COMPANIES || ""),
+  },
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   nodeEnv: process.env.NODE_ENV || "development",
 };
+
+function normalizeGatewayUrl(raw: string) {
+  let base = raw.trim().replace(/\/$/, "");
+  base = base.replace(/^https:\/\/https:\/\//i, "https://");
+  if (!base) return "https://sapgateway.grupomeme.com.gt";
+  return base;
+}
+
+function parseCompanyMap(raw: string) {
+  const map: Record<string, string> = {};
+  for (const part of raw.split(",")) {
+    const piece = part.trim();
+    if (!piece) continue;
+    const sep = piece.includes("=") ? "=" : ":";
+    const [app, gateway] = piece.split(sep);
+    if (app?.trim() && gateway?.trim()) map[app.trim().toUpperCase()] = gateway.trim();
+  }
+  return map;
+}

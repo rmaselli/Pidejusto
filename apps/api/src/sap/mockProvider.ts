@@ -7,7 +7,6 @@ import {
   empresas,
   existencias,
   matrizAprobacion,
-  matrizContable,
   categoriaCuenta,
   ejecucionPresupuesto,
   parametros,
@@ -39,10 +38,9 @@ export function createMockProvider(db: Db): SapProvider {
     },
     async contable() {
       const cta = await db.select().from(cuentasContables);
-      const mcx = await db.select().from(matrizContable);
       const catcta = await db.select().from(categoriaCuenta);
       const emp = await db.select().from(empresas);
-      return { cta, mcx, catcta, emp };
+      return { cta, catcta, emp };
     },
     async matriz() {
       return db.select().from(matrizAprobacion);

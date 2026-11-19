@@ -277,38 +277,18 @@ export const nivelTxt = (n: string) => {
   return steps.map((s) => `Aprobador ${s}`).join(" + ");
 };
 
-/** Matriz contable row: [empresa, ctaDigit, d1, d2, d3, d4, d5, proy, depN, subN, ubiN, linN, prodN, proyN] */
+/** [empresa, ctaDigit, d1, d2, d3, d4, d5, proy, depN, subN, ubiN, linN, prodN, proyN] */
 export type MatrizContableRow = string[];
 
-export function buildContableKey(
-  cta: string,
-  d1: string,
-  d2: string,
-  d4: string,
-  d5: string,
-  proy: string,
-  empresaAnexo: string,
-): string {
-  return `${cta[0] || ""}${d1}${d2}${d4}${d5}${proy}${empresaAnexo}`;
-}
-
 export function validarImputacion(
-  keys: Set<string>,
   cta: string,
-  d1: string,
-  d2: string,
-  d4: string,
-  d5: string,
-  proy: string,
-  empresaAnexo: string,
   requirePlaca: boolean,
   placa: string,
   requireObra: boolean,
   obraProc: string,
   obraEsp: string,
 ): { ok: boolean; validacion: string } {
-  const llave = buildContableKey(cta, d1, d2, d4, d5, proy, empresaAnexo);
-  if (!cta || !keys.has(llave)) {
+  if (!cta) {
     return { ok: false, validacion: "Información incorrecta" };
   }
   if (requirePlaca && !String(placa || "").trim()) {
@@ -324,8 +304,6 @@ export function contableFrom(
   cta: string,
   row: MatrizContableRow | null,
   extra: Partial<ContableImputacion> = {},
-  keys: Set<string>,
-  empresaAnexo: string,
   requirePlaca = false,
   requireObra = false,
 ): ContableImputacion {
@@ -339,14 +317,7 @@ export function contableFrom(
   const obraProc = extra.obraProc || "";
   const obraEsp = extra.obraEsp || "";
   const v = validarImputacion(
-    keys,
     cta,
-    d1,
-    d2,
-    d4,
-    d5,
-    proy,
-    empresaAnexo,
     requirePlaca || !!extra.placa,
     placa,
     requireObra || (cta || "").startsWith("1210"),
@@ -603,7 +574,7 @@ export function localResumen(req: {
     `• **Contabilidad:** ${
       invalidas
         ? invalidas + " línea(s) con imputación inválida"
-        : "todas las líneas cumplen la matriz contable"
+        : "todas las líneas tienen cuenta asignada"
     }.`,
     `• **Ruta:** ${req.ruta.regla} · ${nivelTxt(req.ruta.niveles)} · total ${fQ(req.total)}.`,
     `Recomendación: ${rec}`,

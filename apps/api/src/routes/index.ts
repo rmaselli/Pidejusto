@@ -13,6 +13,7 @@ import {
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { SapProvider } from "../sap/index.js";
 import { SapUpstreamUnavailable } from "../sap/index.js";
+import { gatewayCompanyFor, loadServicioMaestros } from "../sap/gateway.js";
 import { config } from "../config.js";
 import {
   getArticuloDetalle,
@@ -22,7 +23,9 @@ import {
   listNiveles,
   listReglasAprobacion,
   presupuestoBase,
+  sapGatewayConfigured,
   searchArticulos,
+  searchArticulosSap,
 } from "../services/catalog.js";
 import {
   aprobarSolicitud,
@@ -84,8 +87,12 @@ export function apiRoutes(db: Db, sap: SapProvider) {
     asyncHandler(async (req, res) => {
       const empresa = String(req.query.empresa || req.user!.emp);
       const q = req.query.q ? String(req.query.q) : undefined;
+      if (sapGatewayConfigured()) {
+        const found = await searchArticulosSap(db, { empresa, q });
+        return res.json(found);
+      }
       const items = await searchArticulos(db, { empresa, q });
-      res.json({ items });
+      res.json({ items, source: "local" });
     }),
   );
 
@@ -118,6 +125,19 @@ export function apiRoutes(db: Db, sap: SapProvider) {
   );
 
   r.get(
+    "/catalog/servicio-maestros/:empresa",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!sapGatewayConfigured()) {
+        return res.status(503).json({ error: "Pasarela SAP sin API key" });
+      }
+      const company = gatewayCompanyFor(req.params.empresa);
+      const maestros = await loadServicioMaestros(company);
+      res.json({ source: "sap", ...maestros });
+    }),
+  );
+
+  r.get(
     "/catalog/contable/:empresa",
     requireAuth,
     asyncHandler(async (req, res) => {
@@ -126,7 +146,6 @@ export function apiRoutes(db: Db, sap: SapProvider) {
         anexo: ctx.anexo,
         cta: ctx.ctaList,
         catcta: ctx.catcta,
-        centros: ctx.mcx,
       });
     }),
   );

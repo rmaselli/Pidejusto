@@ -144,24 +144,6 @@ export const cuentasContables = pgTable("cuentas_contables", {
   nombre: text("nombre").notNull(),
 });
 
-export const matrizContable = pgTable("matriz_contable", {
-  id: serial("id").primaryKey(),
-  empresa: text("empresa").notNull(),
-  cta: varchar("cta", { length: 8 }).notNull(),
-  dim1: text("dim1").notNull().default(""),
-  dim2: text("dim2").notNull().default(""),
-  dim3: text("dim3").notNull().default(""),
-  dim4: text("dim4").notNull().default(""),
-  dim5: text("dim5").notNull().default(""),
-  proyecto: text("proyecto").notNull().default(""),
-  departamento: text("departamento").notNull().default(""),
-  subdepartamento: text("subdepartamento").notNull().default(""),
-  ubicacion: text("ubicacion").notNull().default(""),
-  lineaProducto: text("linea_producto").notNull().default(""),
-  producto: text("producto").notNull().default(""),
-  nombreProyecto: text("nombre_proyecto").notNull().default(""),
-});
-
 export const categoriaCuenta = pgTable("categoria_cuenta", {
   categoria: text("categoria").primaryKey(),
   cuenta6: varchar("cuenta6", { length: 32 }),

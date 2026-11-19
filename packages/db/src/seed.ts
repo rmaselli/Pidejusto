@@ -39,7 +39,6 @@ type PjData = {
   usr: [string, string, string, string, string][];
   mat: [string, number, number, string, string, string][];
   cta: [string, string][];
-  mcx: string[][];
   catcta: [string, string, string, string, string, string][];
   hom?: Record<string, [string, string, string, number][]>;
 };
@@ -59,7 +58,7 @@ async function main() {
     TRUNCATE
       bitacora, solicitud_lineas, solicitudes, sap_post_lines, sequences,
       series_documento, bodegas, tipos_documento,
-      users, homologacion, categoria_cuenta, matriz_contable, cuentas_contables,
+      users, homologacion, categoria_cuenta, cuentas_contables,
       niveles_aprobacion, matriz_aprobacion, ejecucion_presupuesto, consumo_trimestral, existencias,
       articulos, parametros, empresas
     RESTART IDENTITY CASCADE
@@ -218,29 +217,6 @@ async function main() {
   await db.insert(schema.cuentasContables).values(
     data.cta.map((r) => ({ codigo: String(r[0]), nombre: r[1] })),
   );
-
-  console.log("Seeding matriz contable...", data.mcx.length);
-  for (let i = 0; i < data.mcx.length; i += artChunk) {
-    const slice = data.mcx.slice(i, i + artChunk);
-    await db.insert(schema.matrizContable).values(
-      slice.map((r) => ({
-        empresa: String(r[0]).trim(),
-        cta: String(r[1]),
-        dim1: String(r[2] || ""),
-        dim2: String(r[3] || ""),
-        dim3: String(r[4] || ""),
-        dim4: String(r[5] || ""),
-        dim5: String(r[6] || ""),
-        proyecto: String(r[7] || ""),
-        departamento: String(r[8] || ""),
-        subdepartamento: String(r[9] || ""),
-        ubicacion: String(r[10] || ""),
-        lineaProducto: String(r[11] || ""),
-        producto: String(r[12] || ""),
-        nombreProyecto: String(r[13] || ""),
-      })),
-    );
-  }
 
   await db.insert(schema.categoriaCuenta).values(
     data.catcta.map((r) => ({

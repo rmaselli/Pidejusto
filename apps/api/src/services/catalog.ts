@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@pidejusto/db";
 import {
   articulos,
@@ -9,7 +9,6 @@ import {
   existencias,
   ejecucionPresupuesto,
   matrizAprobacion,
-  matrizContable,
   nivelesAprobacion,
   parametros,
   solicitudLineas,
@@ -22,6 +21,8 @@ import {
   type Params,
   type MatrizRegla,
 } from "@pidejusto/shared";
+import { config } from "../config.js";
+import { gatewayCompanyFor, searchItemsGateway } from "../sap/gateway.js";
 
 export async function getParams(db: Db): Promise<Params> {
   const [p] = await db.select().from(parametros).limit(1);
@@ -62,6 +63,57 @@ export async function searchArticulos(
     .from(articulos)
     .where(and(...conditions))
     .limit(limit);
+}
+
+/** Artículos de SAP vía pasarela. Si el código no está en el catálogo local, lo deja registrado para poder pedirlo. */
+export async function searchArticulosSap(
+  db: Db,
+  opts: { empresa: string; q?: string; limit?: number },
+) {
+  const company = gatewayCompanyFor(opts.empresa);
+  const hits = await searchItemsGateway(company, opts.q || "", opts.limit ?? 40);
+  const codes = [...new Set(hits.map((h) => h.ItemCode))];
+  const local =
+    codes.length === 0
+      ? []
+      : await db
+          .select()
+          .from(articulos)
+          .where(and(eq(articulos.empresa, opts.empresa), inArray(articulos.itemCode, codes)));
+  const known = new Map(local.map((a) => [a.itemCode, a]));
+  const missing = hits.filter((h) => !known.has(h.ItemCode));
+  if (missing.length) {
+    await db
+      .insert(articulos)
+      .values(
+        missing.map((h) => ({
+          empresa: opts.empresa,
+          itemCode: h.ItemCode,
+          itemName: h.ItemName || h.ItemCode,
+          categoria: h.ForeignName || "SAP",
+          precioProm: 0,
+        })),
+      )
+      .onConflictDoNothing();
+  }
+  return {
+    source: "sap" as const,
+    company,
+    items: hits.map((h) => {
+      const row = known.get(h.ItemCode);
+      return {
+        empresa: opts.empresa,
+        itemCode: h.ItemCode,
+        itemName: h.ItemName || row?.itemName || h.ItemCode,
+        categoria: row?.categoria || h.ForeignName || "SAP",
+        precioProm: row?.precioProm ?? 0,
+      };
+    }),
+  };
+}
+
+export function sapGatewayConfigured() {
+  return Boolean(config.gateway.apiKey);
 }
 
 export async function getArticuloDetalle(
@@ -211,40 +263,12 @@ export async function getContableContext(db: Db, empresa: string) {
     empRows.find((e) => e.codigo === empresa)?.nombreAnexo || empresa;
   const cta = await db.select().from(cuentasContables);
   const catcta = await db.select().from(categoriaCuenta);
-  const mcx = await db
-    .select()
-    .from(matrizContable)
-    .where(eq(matrizContable.empresa, anexo));
-
-  const keys = new Set(
-    mcx.map(
-      (r) =>
-        `${r.cta}${r.dim1}${r.dim2}${r.dim4}${r.dim5}${r.proyecto}${r.empresa}`,
-    ),
-  );
 
   return {
     anexo,
     cta: Object.fromEntries(cta.map((c) => [c.codigo, c.nombre])),
     ctaList: cta,
     catcta,
-    mcx: mcx.map((r) => [
-      r.empresa,
-      r.cta,
-      r.dim1,
-      r.dim2,
-      r.dim3,
-      r.dim4,
-      r.dim5,
-      r.proyecto,
-      r.departamento,
-      r.subdepartamento,
-      r.ubicacion,
-      r.lineaProducto,
-      r.producto,
-      r.nombreProyecto,
-    ]),
-    keys,
   };
 }
 
