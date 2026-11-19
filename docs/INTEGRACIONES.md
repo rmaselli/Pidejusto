@@ -67,7 +67,7 @@ SAP_GATEWAY_COMPANIES=
 
 También se aceptan `SAP_BASE_URL` y `SAP_BASE_KEY` si no están las variables `SAP_GATEWAY_*`.
 
-En servicio, `/solicitar` pide los combos con `GET /api/catalog/servicio-maestros/:empresa`. La API consulta, por separado, `ChartOfAccounts`, `ProfitCenters` y, por el cambio de SAP B1, `POST ProjectsService_GetProjectList`, `DimensionsService_GetDimensionList` y `DistributionRulesService_GetDistributionRuleList`. Si una entidad no responde, ese combo queda deshabilitado con el aviso; no hay matriz local de respaldo.
+En servicio, `/solicitar` no carga los catálogos al abrir. Cada campo busca al escribir: `GET /api/catalog/cuentas` (`ChartOfAccounts`, `$top=30`), `GET /api/catalog/proyectos` (`Projects`, `$top=30`) y `GET /api/catalog/dimensiones` (centros con `$filter` y, si hace falta, la lista de `DistributionRulesService` filtrada a 30). Si una entidad no responde, el aviso queda en ese campo.
 
 ## Claude (Anthropic)
 

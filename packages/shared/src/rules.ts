@@ -213,14 +213,14 @@ export function rutaDe(
     const r3 = fuera.find((m) => m.regla === "R3") || match;
     return {
       regla: r3?.regla || "R3",
-      niveles: r3?.niveles || "N1+N2+N3",
+      niveles: "N1",
       desc: r3?.desc || "Excede presupuesto y supera Q 10,000",
     };
   }
   const r2 = fuera.find((m) => m.regla === "R2") || match;
   return {
     regla: r2?.regla || "R2",
-    niveles: r2?.niveles || "N1",
+    niveles: "N1",
     desc: r2?.desc || "Excede presupuesto hasta Q 10,000",
   };
 }
@@ -358,7 +358,8 @@ export function canApprove(
   if (user.rol !== `Aprobador ${codigo}`) return false;
   const cfg = niveles?.find((n) => n.codigo === codigo);
   if (cfg && cfg.activo === false) return false;
-  const alcance = cfg?.alcance ?? (codigo === "N1" ? "empresa" : "todas");
+  if (codigo === "N1") return true;
+  const alcance = cfg?.alcance ?? "todas";
   if (alcance === "empresa" && user.emp !== "TODAS" && user.emp !== req.emp) return false;
   return true;
 }

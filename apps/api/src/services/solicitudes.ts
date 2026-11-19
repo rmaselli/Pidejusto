@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@pidejusto/db";
 import {
+  aprobadorSolicitantes,
   bitacora,
   bodegas,
   solicitudLineas,
@@ -541,6 +542,21 @@ export async function getSolicitud(db: Db, id: string) {
   };
 }
 
+async function solicitantesDe(db: Db, aprobadorId: string) {
+  const rows = await db
+    .select({ id: aprobadorSolicitantes.solicitanteId })
+    .from(aprobadorSolicitantes)
+    .where(eq(aprobadorSolicitantes.aprobadorId, aprobadorId));
+  return new Set(rows.map((r) => r.id));
+}
+
+/** N1 solo autoriza solicitudes de los usuarios que el administrador le asignó. */
+async function cubreSolicitante(db: Db, user: UserInfo, solicitanteId: string) {
+  if (user.rol !== "Aprobador N1") return true;
+  const ids = await solicitantesDe(db, user.id);
+  return ids.has(solicitanteId);
+}
+
 export async function listSolicitudes(
   db: Db,
   user: UserInfo,
@@ -554,9 +570,14 @@ export async function listSolicitudes(
   if (codigoRol) {
     const defs = await listNiveles(db);
     const cfg = defs.find((d) => d.codigo === codigoRol);
-    const alcance = cfg?.alcance ?? (codigoRol === "N1" ? "empresa" : "todas");
-    if (alcance === "empresa" && user.emp !== "TODAS") {
-      rows = rows.filter((r) => r.empresa === user.emp);
+    if (codigoRol === "N1") {
+      const ids = await solicitantesDe(db, user.id);
+      rows = rows.filter((r) => ids.has(r.solicitanteId));
+    } else {
+      const alcance = cfg?.alcance ?? "todas";
+      if (alcance === "empresa" && user.emp !== "TODAS") {
+        rows = rows.filter((r) => r.empresa === user.emp);
+      }
     }
   }
   if (user.rol === "Solicitante") {
@@ -568,13 +589,20 @@ export async function listSolicitudes(
 export async function pendientes(db: Db, user: UserInfo) {
   const rows = await db.select().from(solicitudes).orderBy(desc(solicitudes.createdAt));
   const defs = await listNiveles(db);
+  const asignados = user.rol === "Aprobador N1" ? await solicitantesDe(db, user.id) : null;
   const filtered = rows.filter((r) => {
     if (user.rol === "Admin") return nivelDeEstado(r.estado) !== null;
-    return canApprove(
-      { estado: r.estado as SolicitudEstado, emp: r.empresa },
-      user,
-      defs,
-    );
+    if (
+      !canApprove(
+        { estado: r.estado as SolicitudEstado, emp: r.empresa },
+        user,
+        defs,
+      )
+    ) {
+      return false;
+    }
+    if (asignados && !asignados.has(r.solicitanteId)) return false;
+    return true;
   });
   const out = [];
   for (const r of filtered) {
@@ -624,8 +652,16 @@ export async function aprobarSolicitud(
   if (!canApprove(mini, user, defs) && user.rol !== "Admin") {
     throw Object.assign(new Error("No puede aprobar esta solicitud"), { status: 403 });
   }
+  if (!(await cubreSolicitante(db, user, req.solicitanteId))) {
+    throw Object.assign(new Error("Este aprobador no está asignado a ese solicitante"), {
+      status: 403,
+    });
+  }
   const ruta = req.ruta as { niveles: string; regla: string };
-  const next = nextEstadoAfterApprove(req.estado as SolicitudEstado, ruta.niveles);
+  const next =
+    nivel === "N1"
+      ? "Aprobada"
+      : nextEstadoAfterApprove(req.estado as SolicitudEstado, ruta.niveles);
 
   await db
     .update(solicitudes)
@@ -678,6 +714,11 @@ export async function rechazarSolicitud(
   const mini = { estado: req.estado as SolicitudEstado, emp: req.empresa };
   if (!canApprove(mini, user, defs) && user.rol !== "Admin") {
     throw Object.assign(new Error("No puede rechazar esta solicitud"), { status: 403 });
+  }
+  if (!(await cubreSolicitante(db, user, req.solicitanteId))) {
+    throw Object.assign(new Error("Este aprobador no está asignado a ese solicitante"), {
+      status: 403,
+    });
   }
   await db
     .update(solicitudes)

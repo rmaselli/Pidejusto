@@ -5,7 +5,7 @@ import { api, type Solicitud, type SolicitudListItem } from "@/lib/api";
 import { Badge, Card } from "@/components/ui/card";
 import { dimsLinea, fFecha, fQ } from "@/lib/utils";
 
-const STEPS = ["Pendiente N1", "Pendiente N2", "Pendiente N3", "Aprobada", "Enviada a SAP"];
+const STEPS = ["Pendiente N1", "Aprobada", "Enviada a SAP"];
 
 export default function SeguimientoPage() {
   const [items, setItems] = useState<SolicitudListItem[]>([]);

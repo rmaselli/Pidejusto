@@ -12,7 +12,7 @@ import {
   type CategoriaCuenta,
   type PrecioCompra,
   type PreviewLine,
-  type ServicioMaestros,
+  type SapOpcion,
   type TipoDocumento,
 } from "@/lib/api";
 import { dimsLinea, fFecha, fQ, mayus } from "@/lib/utils";
@@ -60,17 +60,6 @@ const fieldCls =
   "mt-1 w-full rounded-xl border border-line bg-card px-3 py-2 text-sm font-medium text-ink";
 const textCls = `${fieldCls} uppercase`;
 
-type CampoEstado = "cargando" | "error" | "vacio" | "listo";
-
-type CampoSap = {
-  label: string;
-  value: string;
-  options: { code: string; name: string; formato?: string }[];
-  estado: CampoEstado;
-  aviso?: string;
-  onChange: (code: string) => void;
-};
-
 function Field({
   label,
   children,
@@ -114,12 +103,8 @@ export default function SolicitarPage() {
   const [busy, setBusy] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const buscaId = useRef(0);
+  const elegidos = useRef<Record<string, string>>({});
   const [svc, setSvc] = useState<SvcForm>(EMPTY_SVC);
-  const [maestros, setMaestros] = useState<
-    | { estado: "cargando" }
-    | { estado: "error"; mensaje: string }
-    | { estado: "listo"; data: ServicioMaestros }
-  >({ estado: "cargando" });
   const [contable, setContable] = useState<{
     catcta: CategoriaCuenta[];
   } | null>(null);
@@ -151,13 +136,12 @@ export default function SolicitarPage() {
     setCart([]);
     setSelected(null);
     setSvc(EMPTY_SVC);
-    setMaestros({ estado: "cargando" });
+    elegidos.current = {};
   }, [empresa]);
 
   useEffect(() => {
     if (clase !== "servicio" || !empresa) return;
     let cancel = false;
-    setMaestros({ estado: "cargando" });
     void api
       .contable(empresa)
       .then((r) => {
@@ -165,14 +149,6 @@ export default function SolicitarPage() {
       })
       .catch((e) => {
         if (!cancel) setMsg(e.message);
-      });
-    void api
-      .servicioMaestros(empresa)
-      .then((r) => {
-        if (!cancel) setMaestros({ estado: "listo", data: r });
-      })
-      .catch((e) => {
-        if (!cancel) setMaestros({ estado: "error", mensaje: (e as Error).message });
       });
     return () => {
       cancel = true;
@@ -210,86 +186,6 @@ export default function SolicitarPage() {
       cancel = true;
     };
   }, [selected, empresa, clase]);
-
-  const sapCaido = maestros.estado === "error";
-  const sapListo = maestros.estado === "listo" ? maestros.data : null;
-
-  function falta(entidad: string) {
-    return sapListo?.faltantes.some((f) => f.entidad === entidad) ?? false;
-  }
-
-  function campoDe(
-    label: string,
-    value: string,
-    options: CampoSap["options"],
-    entidadCaida: boolean,
-    aviso: string,
-    onChange: (code: string) => void,
-  ): CampoSap {
-    if (maestros.estado === "cargando") {
-      return { label, value: "", options: [], estado: "cargando", onChange };
-    }
-    if (sapCaido) {
-      return { label, value: "", options: [], estado: "error", onChange };
-    }
-    if (entidadCaida) {
-      return { label, value: "", options: [], estado: "error", aviso, onChange };
-    }
-    if (!options.length) {
-      return {
-        label,
-        value: "",
-        options: [],
-        estado: "vacio",
-        aviso: "SAP no tiene registros para esta lista.",
-        onChange,
-      };
-    }
-    return { label, value, options, estado: "listo", onChange };
-  }
-
-  const cuentaCampo = campoDe(
-    "Cuenta de mayor",
-    svc.cuenta,
-    sapListo?.cuentas || [],
-    falta("ChartOfAccounts"),
-    "SAP no devolvió el catálogo de cuentas.",
-    (cuenta) => patchSvc({ cuenta }),
-  );
-  const proyectoCampo = campoDe(
-    "Proyecto",
-    svc.proyecto,
-    sapListo?.proyectos || [],
-    falta("ProjectsService"),
-    "SAP no devolvió los proyectos.",
-    (proyecto) => patchSvc({ proyecto }),
-  );
-
-  function campoDim(n: number, etiqueta: string, value: string, onChange: (code: string) => void) {
-    const dim = sapListo?.dimensiones.find((d) => d.n === n);
-    const opciones = dim?.opciones || [];
-    const centrosMal = falta("ProfitCenters");
-    const reglasMal = falta("DistributionRulesService");
-    const aviso = centrosMal && reglasMal
-      ? "SAP no devolvió centros ni reglas de distribución."
-      : centrosMal
-        ? "SAP no devolvió los centros de beneficio."
-        : "SAP no devolvió las reglas de distribución.";
-    return campoDe(
-      dim?.nombre || etiqueta,
-      value,
-      opciones,
-      !opciones.length && (centrosMal || reglasMal),
-      aviso,
-      onChange,
-    );
-  }
-
-  const dep = campoDim(1, "Departamento", svc.d1, (d1) => patchSvc({ d1 }));
-  const sub = campoDim(2, "Sub departamento", svc.d2, (d2) => patchSvc({ d2 }));
-  const loc = campoDim(3, "Localidad", svc.d3, (d3) => patchSvc({ d3 }));
-  const lin = campoDim(4, "Línea de producto", svc.d4, (d4) => patchSvc({ d4 }));
-  const prod = campoDim(5, "Producto", svc.d5, (d5) => patchSvc({ d5 }));
 
   const catMatch = (contable?.catcta || []).filter(
     (c) => c.cuenta6 === svc.cuenta || c.cuenta7 === svc.cuenta,
@@ -382,18 +278,8 @@ export default function SolicitarPage() {
       setMsg("Indique el precio unitario");
       return;
     }
-    const campos = [cuentaCampo, proyectoCampo, dep, sub, loc, lin, prod];
-    const pendiente = campos.find((c) => c.estado !== "listo");
-    if (pendiente) {
-      setMsg(
-        pendiente.estado === "cargando"
-          ? "Espere la consulta a SAP"
-          : `${pendiente.label}: ${pendiente.aviso || "no disponible"}`,
-      );
-      return;
-    }
     if (!svc.cuenta || !svc.proyecto || !svc.d1 || !svc.d2 || !svc.d3 || !svc.d4 || !svc.d5) {
-      setMsg("Complete cuenta de mayor, proyecto y las dimensiones");
+      setMsg("Seleccione cuenta, proyecto y dimensiones de cada lista");
       return;
     }
     if (needsPlaca && !svc.placa.trim()) {
@@ -427,12 +313,12 @@ export default function SolicitarPage() {
         d4: svc.d4,
         d5: svc.d5,
         proy: svc.proyecto,
-        depN: nombreDe(dep.options, svc.d1),
-        subN: nombreDe(sub.options, svc.d2),
-        ubiN: nombreDe(loc.options, svc.d3),
-        linN: nombreDe(lin.options, svc.d4),
-        prodN: nombreDe(prod.options, svc.d5),
-        proyN: nombreDe(proyectoCampo.options, svc.proyecto),
+        depN: elegidos.current.d1 || svc.d1,
+        subN: elegidos.current.d2 || svc.d2,
+        ubiN: elegidos.current.d3 || svc.d3,
+        linN: elegidos.current.d4 || svc.d4,
+        prodN: elegidos.current.d5 || svc.d5,
+        proyN: elegidos.current.proy || svc.proyecto,
         placa: svc.placa,
         obraProc: svc.obraProc,
         obraEsp: svc.obraEsp,
@@ -777,19 +663,81 @@ export default function SolicitarPage() {
                 />
               </Field>
             </div>
-            {maestros.estado === "error" && (
-              <p className="mt-3 rounded-xl bg-[#F6EBCB] px-3 py-2 text-sm text-[#7a5a08]">
-                {maestros.mensaje}
-              </p>
-            )}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <SapSelect campo={cuentaCampo} />
-              <SapSelect campo={proyectoCampo} />
-              <SapSelect campo={dep} />
-              <SapSelect campo={sub} />
-              <SapSelect campo={loc} />
-              <SapSelect campo={lin} />
-              <SapSelect campo={prod} />
+              <SapBusqueda
+                key={`cuenta-${empresa}`}
+                label="Cuenta de mayor"
+                placeholder="Código o nombre"
+                vacio="Sin cuentas con ese texto."
+                buscar={(q) => api.cuentas(empresa, q).then((r) => r.items)}
+                onPick={(code) => patchSvc({ cuenta: code })}
+              />
+              <SapBusqueda
+                key={`proy-${empresa}`}
+                label="Proyecto"
+                placeholder="Código o nombre"
+                vacio="Sin proyectos con ese texto."
+                buscar={(q) => api.proyectos(empresa, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.proy = name;
+                  patchSvc({ proyecto: code });
+                }}
+              />
+              <SapBusqueda
+                key={`d1-${empresa}`}
+                label="Departamento"
+                placeholder="Código o nombre"
+                vacio="Sin departamentos con ese texto."
+                buscar={(q) => api.dimensiones(empresa, 1, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.d1 = name;
+                  patchSvc({ d1: code });
+                }}
+              />
+              <SapBusqueda
+                key={`d2-${empresa}`}
+                label="Sub departamento"
+                placeholder="Código o nombre"
+                vacio="Sin sub departamentos con ese texto."
+                buscar={(q) => api.dimensiones(empresa, 2, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.d2 = name;
+                  patchSvc({ d2: code });
+                }}
+              />
+              <SapBusqueda
+                key={`d3-${empresa}`}
+                label="Localidad"
+                placeholder="Código o nombre"
+                vacio="Sin localidades con ese texto."
+                buscar={(q) => api.dimensiones(empresa, 3, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.d3 = name;
+                  patchSvc({ d3: code });
+                }}
+              />
+              <SapBusqueda
+                key={`d4-${empresa}`}
+                label="Línea de producto"
+                placeholder="Código o nombre"
+                vacio="Sin líneas con ese texto."
+                buscar={(q) => api.dimensiones(empresa, 4, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.d4 = name;
+                  patchSvc({ d4: code });
+                }}
+              />
+              <SapBusqueda
+                key={`d5-${empresa}`}
+                label="Producto"
+                placeholder="Código o nombre"
+                vacio="Sin productos con ese texto."
+                buscar={(q) => api.dimensiones(empresa, 5, q).then((r) => r.items)}
+                onPick={(code, name) => {
+                  elegidos.current.d5 = name;
+                  patchSvc({ d5: code });
+                }}
+              />
             </div>
             {(needsPlaca || needsObra) && (
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -905,40 +853,103 @@ export default function SolicitarPage() {
   );
 }
 
-function nombreDe(options: { code: string; name: string }[], code: string) {
-  return options.find((o) => o.code === code)?.name || code;
-}
+function SapBusqueda({
+  label,
+  placeholder,
+  vacio,
+  buscar,
+  onPick,
+}: {
+  label: string;
+  placeholder: string;
+  vacio: string;
+  buscar: (q: string) => Promise<SapOpcion[]>;
+  onPick: (code: string, name: string) => void;
+}) {
+  const [texto, setTexto] = useState("");
+  const [hits, setHits] = useState<SapOpcion[]>([]);
+  const [estado, setEstado] = useState<"idle" | "buscando" | "error" | "vacio">("idle");
+  const [aviso, setAviso] = useState("");
+  const elegida = useRef("");
+  const req = useRef(0);
+  const buscarRef = useRef(buscar);
+  buscarRef.current = buscar;
 
-function SapSelect({ campo }: { campo: CampoSap }) {
-  const bloqueado = campo.estado !== "listo";
-  const placeholder =
-    campo.estado === "cargando"
-      ? "Consultando SAP…"
-      : campo.estado === "error"
-        ? "No disponible"
-        : campo.estado === "vacio"
-          ? "Sin registros en SAP"
-          : "Seleccione";
+  useEffect(() => {
+    if (texto === elegida.current || texto.trim().length < 2) {
+      setHits([]);
+      setEstado("idle");
+      return;
+    }
+    const handle = setTimeout(() => {
+      const id = ++req.current;
+      setEstado("buscando");
+      setHits([]);
+      void buscarRef
+        .current(texto.trim())
+        .then((items) => {
+          if (id !== req.current) return;
+          setHits(items);
+          setEstado(items.length ? "idle" : "vacio");
+        })
+        .catch((e) => {
+          if (id !== req.current) return;
+          setHits([]);
+          setEstado("error");
+          setAviso((e as Error).message);
+        });
+    }, 400);
+    return () => {
+      clearTimeout(handle);
+      req.current += 1;
+    };
+  }, [texto]);
+
   return (
-    <label className="block">
-      <span className="text-xs font-bold uppercase text-muted">{campo.label}</span>
-      <select
-        className={`${fieldCls} ${bloqueado ? "text-muted" : ""}`}
-        value={bloqueado ? "" : campo.value}
-        disabled={bloqueado}
-        onChange={(e) => campo.onChange(e.target.value)}
-      >
-        <option value="">{placeholder}</option>
-        {campo.estado === "listo" &&
-          campo.options.map((o) => (
-            <option key={o.code} value={o.code}>
-              {(o.formato && o.formato !== o.code ? `${o.formato} · ` : "") +
-                `${o.name} · ${o.code}`}
-            </option>
-          ))}
-      </select>
-      {bloqueado && campo.aviso && (
-        <span className="mt-1 block text-xs font-medium text-[#7a5a08]">{campo.aviso}</span>
+    <label className="relative block">
+      <span className="text-xs font-bold uppercase text-muted">{label}</span>
+      <input
+        className={textCls}
+        value={texto}
+        placeholder={placeholder}
+        autoComplete="off"
+        onChange={(e) => {
+          const next = mayus(e.target.value);
+          setTexto(next);
+          if (next !== elegida.current) onPick("", "");
+        }}
+      />
+      {estado === "buscando" && <span className="mt-1 block text-xs text-muted">Buscando en SAP…</span>}
+      {estado === "error" && (
+        <span className="mt-1 block text-xs font-medium text-[#7a5a08]">{aviso}</span>
+      )}
+      {estado === "vacio" && <span className="mt-1 block text-xs text-muted">{vacio}</span>}
+      {hits.length > 0 && (
+        <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-line bg-card py-1 shadow-lg">
+          {hits.map((c) => {
+            const visible = c.formato && c.formato !== c.code ? c.formato : c.code;
+            const chosen = c.formato && c.formato !== c.code ? `${c.formato} · ${c.name}` : `${c.code} · ${c.name}`;
+            return (
+              <li key={c.code}>
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-soft"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    elegida.current = chosen;
+                    setTexto(chosen);
+                    setHits([]);
+                    setEstado("idle");
+                    onPick(c.code, c.name || c.code);
+                  }}
+                >
+                  <span className="font-semibold">{visible}</span>
+                  <span className="text-muted"> · {c.name}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </label>
   );

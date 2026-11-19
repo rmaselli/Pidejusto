@@ -79,6 +79,223 @@ export async function searchItemsGateway(
     .filter((row) => row.ItemCode);
 }
 
+/** Busca cuentas activas por código o nombre. Una sola página: no recorre el catálogo. */
+export async function searchCuentasGateway(company: string, q: string): Promise<SapOpcion[]> {
+  if (!config.gateway.apiKey) {
+    throw new GatewayError("Pasarela SAP sin API key", 503, "NOT_CONFIGURED");
+  }
+  const companyCode = company.trim();
+  if (!companyCode) {
+    throw new GatewayError("Indique la empresa SAP (X-Company)", 400, "COMPANY_REQUIRED");
+  }
+  const term = q.trim().toLocaleUpperCase("es").replace(/'/g, "''").slice(0, 40);
+  if (term.length < 2) return [];
+
+  const top = 30;
+  const attempts = [
+    {
+      select: "Code,Name,ActiveAccount,FatherAccountKey,FormatCode",
+      filter: `ActiveAccount eq 'tYES' and (startswith(Code,'${term}') or substringof('${term}',Name) or startswith(FormatCode,'${term}'))`,
+    },
+    {
+      select: "Code,Name,FatherAccountKey",
+      filter: `startswith(Code,'${term}') or substringof('${term}',Name)`,
+    },
+  ];
+  let rows: Record<string, unknown>[] = [];
+  let last: GatewayError | null = null;
+  for (const attempt of attempts) {
+    try {
+      const data = await gatewayGet(
+        `/api/v1/odata/ChartOfAccounts?$select=${attempt.select}&$orderby=Code&$top=${top}&$filter=${encodeURIComponent(attempt.filter)}`,
+        companyCode,
+      );
+      rows = readValue(data);
+      last = null;
+      break;
+    } catch (e) {
+      if (!(e instanceof GatewayError) || e.code !== "BAD_REQUEST") throw e;
+      last = e;
+    }
+  }
+  if (last) throw last;
+
+  const padres = new Set(
+    rows.map((r) => String(r.FatherAccountKey || "").trim()).filter(Boolean),
+  );
+  return rows
+    .filter((r) => isYes(r.ActiveAccount))
+    .map((r) => ({
+      code: String(r.Code || "").trim(),
+      name: String(r.Name || "").trim(),
+      formato: String(r.FormatCode || "").trim() || undefined,
+    }))
+    .filter((r) => r.code && !padres.has(r.code));
+}
+
+const serviceCache = new Map<string, { at: number; rows: Record<string, unknown>[] }>();
+const SERVICE_CACHE_MS = 5 * 60 * 1000;
+
+/** La lista de un servicio no acepta $filter. Se pide una vez y se filtra en memoria. */
+async function serviceList(company: string, action: string) {
+  const key = `${company}|${action}`;
+  const hit = serviceCache.get(key);
+  if (hit && Date.now() - hit.at < SERVICE_CACHE_MS) return hit.rows;
+  const data = await gatewayPost(`/api/v1/odata/${action}`, company);
+  const rows = readRows(data);
+  serviceCache.set(key, { at: Date.now(), rows });
+  return rows;
+}
+
+function textoBusqueda(q: string) {
+  const raw = q.trim().toLocaleUpperCase("es").slice(0, 40);
+  return { raw, odata: raw.replace(/'/g, "''") };
+}
+
+function contiene(term: string, ...parts: unknown[]) {
+  return parts.some((part) => String(part || "").toLocaleUpperCase("es").includes(term));
+}
+
+export async function searchProyectosGateway(company: string, q: string): Promise<SapOpcion[]> {
+  const companyCode = company.trim();
+  const { odata } = textoBusqueda(q);
+  if (!companyCode) throw new GatewayError("Indique la empresa SAP (X-Company)", 400, "COMPANY_REQUIRED");
+  if (odata.length < 2) return [];
+  const text = `startswith(Code,'${odata}') or substringof('${odata}',Name)`;
+  const attempts = [
+    { select: "Code,Name,ValidFrom,ValidTo", filter: text },
+    { select: "Code,Name", filter: text },
+  ];
+  const today = new Date().toISOString().slice(0, 10);
+  let last: GatewayError | null = null;
+  for (const attempt of attempts) {
+    try {
+      const data = await gatewayGet(
+        `/api/v1/odata/Projects?$select=${attempt.select}&$orderby=Code&$top=30&$filter=${encodeURIComponent(attempt.filter)}`,
+        companyCode,
+      );
+      return readValue(data)
+        .filter((r) => vigente(r.ValidFrom, r.ValidTo, today))
+        .map((r) => ({
+          code: String(r.Code || "").trim(),
+          name: String(r.Name || "").trim() || String(r.Code || "").trim(),
+        }))
+        .filter((r) => r.code);
+    } catch (e) {
+      if (!(e instanceof GatewayError) || e.code !== "BAD_REQUEST") throw e;
+      last = e;
+    }
+  }
+  throw last || new GatewayError("SAP rechazó la consulta de proyectos", 400, "BAD_REQUEST");
+}
+
+export async function searchDimensionGateway(
+  company: string,
+  n: number,
+  q: string,
+): Promise<{ items: SapOpcion[]; nombre: string }> {
+  const companyCode = company.trim();
+  const { raw, odata } = textoBusqueda(q);
+  if (!companyCode) throw new GatewayError("Indique la empresa SAP (X-Company)", 400, "COMPANY_REQUIRED");
+  if (!(n >= 1 && n <= 5)) throw new GatewayError("Dimensión inválida", 400, "BAD_REQUEST");
+  const nombre = await nombreDimension(companyCode, n);
+  if (raw.length < 2) return { items: [], nombre };
+
+  let centros: SapOpcion[] = [];
+  let centrosError: GatewayError | null = null;
+  try {
+    centros = await searchCentros(companyCode, n, odata);
+  } catch (e) {
+    if (!(e instanceof GatewayError)) throw e;
+    if (!esFalta(e)) throw e;
+    centrosError = e;
+  }
+
+  let reglas: SapOpcion[] = [];
+  let reglasError: GatewayError | null = null;
+  try {
+    const rows = await serviceList(companyCode, "DistributionRulesService_GetDistributionRuleList");
+    reglas = rows
+      .filter((r) => Number(r.InWhichDimension) === n && isYes(r.Active))
+      .filter((r) => contiene(raw, r.FactorCode, r.FactorDescription))
+      .map((r) => ({
+        code: String(r.FactorCode || "").trim(),
+        name: String(r.FactorDescription || "").trim() || String(r.FactorCode || "").trim(),
+      }))
+      .filter((r) => r.code);
+  } catch (e) {
+    if (!(e instanceof GatewayError)) throw e;
+    if (!esFalta(e)) throw e;
+    reglasError = e;
+  }
+
+  if (centrosError && reglasError) throw centrosError;
+  const vistos = new Set<string>();
+  const items: SapOpcion[] = [];
+  for (const item of [...centros, ...reglas]) {
+    if (vistos.has(item.code)) continue;
+    vistos.add(item.code);
+    items.push(item);
+    if (items.length >= 30) break;
+  }
+  return { items, nombre };
+}
+
+async function searchCentros(company: string, n: number, odata: string) {
+  const text = `startswith(CenterCode,'${odata}') or substringof('${odata}',CenterName)`;
+  const attempts = [
+    {
+      select: "CenterCode,CenterName,InWhichDimension,Active",
+      filter: `InWhichDimension eq ${n} and Active eq 'tYES' and (${text})`,
+    },
+    {
+      select: "CenterCode,CenterName,InWhichDimension",
+      filter: `InWhichDimension eq ${n} and (${text})`,
+    },
+  ];
+  let last: GatewayError | null = null;
+  for (const attempt of attempts) {
+    try {
+      const data = await gatewayGet(
+        `/api/v1/odata/ProfitCenters?$select=${attempt.select}&$orderby=CenterCode&$top=30&$filter=${encodeURIComponent(attempt.filter)}`,
+        company,
+      );
+      return readValue(data)
+        .filter((r) => isYes(r.Active))
+        .map((r) => ({
+          code: String(r.CenterCode || "").trim(),
+          name: String(r.CenterName || "").trim() || String(r.CenterCode || "").trim(),
+        }))
+        .filter((r) => r.code);
+    } catch (e) {
+      if (!(e instanceof GatewayError) || e.code !== "BAD_REQUEST") throw e;
+      last = e;
+    }
+  }
+  throw last || new GatewayError("SAP rechazó la consulta de centros", 400, "BAD_REQUEST");
+}
+
+async function nombreDimension(company: string, n: number) {
+  try {
+    const rows = await serviceList(company, "DimensionsService_GetDimensionList");
+    const row = rows.find((r) => Number(r.DimensionCode) === n);
+    const nombre = String(row?.DimensionName || row?.DimensionDescription || "").trim();
+    if (nombre) return nombre;
+  } catch (e) {
+    if (!(e instanceof GatewayError) || !esFalta(e)) throw e;
+  }
+  return DIM_ESPERADA[n - 1] || "Dimensión";
+}
+
+function esFalta(e: GatewayError) {
+  return (
+    e.code === "ENDPOINT_NOT_FOUND" ||
+    e.code === "ENDPOINT_DISABLED" ||
+    e.code === "FORBIDDEN" ||
+    e.code === "BAD_REQUEST"
+  );
+}
+
 export function gatewayCompanyFor(empresaCodigo: string) {
   const code = empresaCodigo.trim().toUpperCase();
   return config.gateway.companies[code] || config.gateway.company || empresaCodigo.trim();
@@ -241,10 +458,9 @@ type ODataAttempt = { select: string; filter?: string; orderby?: string };
 
 /**
  * Maestros de la línea de servicio, según la referencia de Service Layer:
- * ChartOfAccounts y ProfitCenters siguen en OData.
- * En SAP B1 los catálogos de proyecto, dimensión y regla pasaron a servicio:
- * POST ProjectsService_GetProjectList, DimensionsService_GetDimensionList
- * y DistributionRulesService_GetDistributionRuleList.
+ * ProfitCenters sigue en OData. Las cuentas de mayor se buscan aparte, por texto.
+ * Projects se consulta con GET /odata/Projects.
+ * DimensionsService_GetDimensionList y DistributionRulesService_GetDistributionRuleList siguen en servicio.
  * Cada llamada va aparte: si IT no la tiene en la lista blanca, las demás siguen.
  */
 export async function loadServicioMaestros(company: string): Promise<ServicioMaestrosSap> {
@@ -259,23 +475,12 @@ export async function loadServicioMaestros(company: string): Promise<ServicioMae
   const faltantes: ServicioMaestrosSap["faltantes"] = [];
   const avisos: string[] = [];
 
-  const cuentasRaw = await readEntity(
-    "ChartOfAccounts",
+  const proyectosRaw = await readEntity(
+    "Projects",
     [
-      {
-        select: "Code,Name,ActiveAccount,FatherAccountKey,FormatCode",
-        filter: "ActiveAccount eq 'tYES'",
-        orderby: "Code",
-      },
-      { select: "Code,Name,ActiveAccount,FatherAccountKey", filter: "ActiveAccount eq 'tYES'" },
+      { select: "Code,Name,ValidFrom,ValidTo", orderby: "Code" },
       { select: "Code,Name", orderby: "Code" },
     ],
-    companyCode,
-    faltantes,
-  );
-  const proyectosRaw = await readService(
-    "ProjectsService",
-    "ProjectsService_GetProjectList",
     companyCode,
     faltantes,
   );
@@ -301,21 +506,6 @@ export async function loadServicioMaestros(company: string): Promise<ServicioMae
     companyCode,
     faltantes,
   );
-
-  const padres = new Set(
-    cuentasRaw
-      .map((r) => String(r.FatherAccountKey || "").trim())
-      .filter(Boolean),
-  );
-  const cuentas = cuentasRaw
-    .filter((r) => isYes(r.ActiveAccount))
-    .map((r) => ({
-      code: String(r.Code || "").trim(),
-      name: String(r.Name || "").trim(),
-      formato: String(r.FormatCode || "").trim() || undefined,
-    }))
-    .filter((r) => r.code && !padres.has(r.code))
-    .sort((a, b) => a.code.localeCompare(b.code, "es"));
 
   const today = new Date().toISOString().slice(0, 10);
   const proyectos = proyectosRaw
@@ -386,7 +576,7 @@ export async function loadServicioMaestros(company: string): Promise<ServicioMae
     return { n, nombre, esperado, origen, opciones };
   });
 
-  return { company: companyCode, cuentas, proyectos, dimensiones, faltantes, avisos };
+  return { company: companyCode, cuentas: [], proyectos, dimensiones, faltantes, avisos };
 }
 
 /** POST sin cuerpo, como lo documenta Service Layer para estos servicios. */

@@ -7,6 +7,7 @@ import {
   serial,
   text,
   timestamp,
+  primaryKey,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -129,7 +130,7 @@ export const matrizAprobacion = pgTable("matriz_aprobacion", {
   descripcion: text("descripcion"),
 });
 
-/** Catálogo fijo de los tres niveles. El orden N1 → N2 → N3 no cambia. */
+/** El esquema vigente es un solo nivel: N1. */
 export const nivelesAprobacion = pgTable("niveles_aprobacion", {
   codigo: varchar("codigo", { length: 8 }).primaryKey(),
   nombre: text("nombre").notNull(),
@@ -161,6 +162,16 @@ export const homologacion = pgTable("homologacion", {
   descripcionLocal: text("descripcion_local"),
   precioProm: doublePrecision("precio_prom").default(0),
 });
+
+/** Usuarios cuyas solicitudes autoriza un aprobador N1. */
+export const aprobadorSolicitantes = pgTable(
+  "aprobador_solicitantes",
+  {
+    aprobadorId: varchar("aprobador_id", { length: 64 }).notNull(),
+    solicitanteId: varchar("solicitante_id", { length: 64 }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.aprobadorId, t.solicitanteId] })],
+);
 
 export const users = pgTable("users", {
   id: varchar("id", { length: 64 }).primaryKey(),

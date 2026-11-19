@@ -124,7 +124,7 @@ export default function AprobarPage() {
               )
             }
           >
-            Resumen con Claude
+            Resumen
           </Button>
           {ai && (
             <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-brand-600 bg-soft p-3 text-sm">

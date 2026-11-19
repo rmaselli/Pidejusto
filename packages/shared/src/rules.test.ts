@@ -55,6 +55,7 @@ console.assert(al.tipo === "Sobre máximo", "sobre max");
 console.assert(rutaDe(matriz, 100, true).niveles === "AUTO", "R1 auto");
 console.assert(rutaDe(matriz, 5000, false).regla === "R2", "R2");
 console.assert(rutaDe(matriz, 12021, false).regla === "R3", "R3");
+console.assert(rutaDe(matriz, 12021, false).niveles === "N1", "R3 solo N1");
 console.assert(
   nextEstadoAfterApprove("Pendiente N1", "N1+N2+N3") === "Pendiente N2",
   "n1 a n2",

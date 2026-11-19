@@ -1,9 +1,15 @@
 import { Router } from "express";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray, or } from "drizzle-orm";
 import type { Db } from "@pidejusto/db";
-import { articulos, matrizAprobacion, nivelesAprobacion, sapPostLines, users } from "@pidejusto/db";
 import {
-  cadenasPermitidas,
+  aprobadorSolicitantes,
+  articulos,
+  matrizAprobacion,
+  nivelesAprobacion,
+  sapPostLines,
+  users,
+} from "@pidejusto/db";
+import {
   codigoDeRol,
   COMPROMETEN,
   ROLES,
@@ -13,7 +19,13 @@ import {
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { SapProvider } from "../sap/index.js";
 import { SapUpstreamUnavailable } from "../sap/index.js";
-import { gatewayCompanyFor, loadServicioMaestros } from "../sap/gateway.js";
+import {
+  gatewayCompanyFor,
+  loadServicioMaestros,
+  searchCuentasGateway,
+  searchDimensionGateway,
+  searchProyectosGateway,
+} from "../sap/gateway.js";
 import { config } from "../config.js";
 import {
   getArticuloDetalle,
@@ -121,6 +133,53 @@ export function apiRoutes(db: Db, sap: SapProvider) {
       );
       if (!detail) return res.status(404).json({ error: "No encontrado" });
       res.json(detail);
+    }),
+  );
+
+  r.get(
+    "/catalog/cuentas",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!sapGatewayConfigured()) {
+        return res.status(503).json({ error: "Pasarela SAP sin API key" });
+      }
+      const empresa = String(req.query.empresa || "").trim();
+      if (!empresa) return res.status(400).json({ error: "Indique la empresa" });
+      const company = gatewayCompanyFor(empresa);
+      const items = await searchCuentasGateway(company, String(req.query.q || ""));
+      res.json({ items, company });
+    }),
+  );
+
+  r.get(
+    "/catalog/proyectos",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!sapGatewayConfigured()) {
+        return res.status(503).json({ error: "Pasarela SAP sin API key" });
+      }
+      const empresa = String(req.query.empresa || "").trim();
+      if (!empresa) return res.status(400).json({ error: "Indique la empresa" });
+      const company = gatewayCompanyFor(empresa);
+      const items = await searchProyectosGateway(company, String(req.query.q || ""));
+      res.json({ items, company });
+    }),
+  );
+
+  r.get(
+    "/catalog/dimensiones",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!sapGatewayConfigured()) {
+        return res.status(503).json({ error: "Pasarela SAP sin API key" });
+      }
+      const empresa = String(req.query.empresa || "").trim();
+      const n = Number(req.query.n);
+      if (!empresa) return res.status(400).json({ error: "Indique la empresa" });
+      if (!(n >= 1 && n <= 5)) return res.status(400).json({ error: "Dimensión inválida" });
+      const company = gatewayCompanyFor(empresa);
+      const found = await searchDimensionGateway(company, n, String(req.query.q || ""));
+      res.json({ ...found, company });
     }),
   );
 
@@ -381,12 +440,40 @@ export function apiRoutes(db: Db, sap: SapProvider) {
     "/niveles-aprobacion",
     requireAuth,
     asyncHandler(async (_req, res) => {
-      const [niveles, reglas] = await Promise.all([
+      const [todos, reglas, links, personas] = await Promise.all([
         listNiveles(db),
         listReglasAprobacion(db),
+        db.select().from(aprobadorSolicitantes),
+        db
+          .select({
+            id: users.id,
+            nombre: users.nombre,
+            rol: users.rol,
+            empresa: users.empresa,
+          })
+          .from(users),
       ]);
-      const cadenas = cadenasPermitidas(niveles.map((n) => n.codigo));
-      res.json({ niveles, reglas, cadenas });
+      const niveles = todos.filter((n) => n.codigo === "N1");
+      const porId = new Map(personas.map((p) => [p.id, p]));
+      const porAprobador = new Map<string, string[]>();
+      for (const link of links) {
+        const ids = porAprobador.get(link.aprobadorId) || [];
+        ids.push(link.solicitanteId);
+        porAprobador.set(link.aprobadorId, ids);
+      }
+      const asignaciones = [...porAprobador.entries()].map(([aprobadorId, ids]) => {
+        const aprobador = porId.get(aprobadorId);
+        return {
+          aprobadorId,
+          nombre: aprobador?.nombre || aprobadorId,
+          empresa: aprobador?.empresa || "",
+          solicitantes: ids
+            .map((id) => porId.get(id))
+            .filter((p): p is NonNullable<typeof p> => !!p)
+            .map((p) => ({ id: p.id, nombre: p.nombre, empresa: p.empresa })),
+        };
+      });
+      res.json({ niveles, reglas, cadenas: ["AUTO", "N1"], asignaciones });
     }),
   );
 
@@ -395,8 +482,8 @@ export function apiRoutes(db: Db, sap: SapProvider) {
     requireRole("Admin"),
     asyncHandler(async (req, res) => {
       const codigo = String(req.params.codigo || "").toUpperCase();
-      if (codigo !== "N1" && codigo !== "N2" && codigo !== "N3") {
-        return res.status(400).json({ error: "Solo existen los niveles N1, N2 y N3" });
+      if (codigo !== "N1") {
+        return res.status(400).json({ error: "El esquema de autorización es solo el nivel N1" });
       }
       const nombre = String(req.body?.nombre || "").trim();
       const descripcion = String(req.body?.descripcion || "").trim();
@@ -435,10 +522,10 @@ export function apiRoutes(db: Db, sap: SapProvider) {
     asyncHandler(async (req, res) => {
       const id = Number(req.params.id);
       const niveles = String(req.body?.niveles || "").trim();
-      const defs = await listNiveles(db);
-      const permitidas = cadenasPermitidas(defs.map((n) => n.codigo));
-      if (!permitidas.includes(niveles)) {
-        return res.status(400).json({ error: "Cadena de niveles no válida" });
+      if (niveles !== "AUTO" && niveles !== "N1") {
+        return res.status(400).json({
+          error: "Solo se permite aprobación automática o el nivel N1",
+        });
       }
       const [row] = await db
         .update(matrizAprobacion)
@@ -464,7 +551,16 @@ export function apiRoutes(db: Db, sap: SapProvider) {
     "/admin/users",
     requireRole("Admin"),
     asyncHandler(async (_req, res) => {
-      const list = await db.select().from(users).orderBy(asc(users.nombre));
+      const [list, links] = await Promise.all([
+        db.select().from(users).orderBy(asc(users.nombre)),
+        db.select().from(aprobadorSolicitantes),
+      ]);
+      const porAprobador = new Map<string, string[]>();
+      for (const link of links) {
+        const ids = porAprobador.get(link.aprobadorId) || [];
+        ids.push(link.solicitanteId);
+        porAprobador.set(link.aprobadorId, ids);
+      }
       res.json({
         users: list.map((u) => ({
           id: u.id,
@@ -475,6 +571,7 @@ export function apiRoutes(db: Db, sap: SapProvider) {
           empresa: u.empresa,
           puesto: u.puesto || "",
           activo: u.activo,
+          solicitantes: porAprobador.get(u.id) || [],
         })),
       });
     }),
@@ -550,6 +647,9 @@ export function apiRoutes(db: Db, sap: SapProvider) {
         }
         patch.email = email;
       }
+      const solicitantes = Array.isArray(req.body.solicitantes)
+        ? [...new Set((req.body.solicitantes as unknown[]).map((id) => String(id)))]
+        : null;
       try {
         const [u] = await db
           .update(users)
@@ -557,6 +657,52 @@ export function apiRoutes(db: Db, sap: SapProvider) {
           .where(eq(users.id, req.params.id))
           .returning();
         if (!u) return res.status(404).json({ error: "No encontrado" });
+        let asignados: string[] = [];
+        if (u.rol !== "Aprobador N1") {
+          await db
+            .delete(aprobadorSolicitantes)
+            .where(eq(aprobadorSolicitantes.aprobadorId, u.id));
+        } else if (solicitantes) {
+          const validos = solicitantes.filter((id) => id && id !== u.id);
+          if (validos.length) {
+            const existen = await db
+              .select({ id: users.id, rol: users.rol, empresa: users.empresa })
+              .from(users)
+              .where(inArray(users.id, validos));
+            const porId = new Map(existen.map((row) => [row.id, row]));
+            for (const id of validos) {
+              const row = porId.get(id);
+              if (!row) {
+                return res.status(400).json({ error: `Usuario no encontrado: ${id}` });
+              }
+              if (row.rol !== "Solicitante") {
+                return res.status(400).json({
+                  error: "Solo se asocian usuarios con rol Solicitante",
+                });
+              }
+              if (row.empresa !== u.empresa) {
+                return res.status(400).json({
+                  error: "El solicitante debe ser de la misma empresa que el aprobador",
+                });
+              }
+            }
+          }
+          await db
+            .delete(aprobadorSolicitantes)
+            .where(eq(aprobadorSolicitantes.aprobadorId, u.id));
+          if (validos.length) {
+            await db.insert(aprobadorSolicitantes).values(
+              validos.map((solicitanteId) => ({ aprobadorId: u.id, solicitanteId })),
+            );
+          }
+          asignados = validos;
+        } else {
+          const links = await db
+            .select()
+            .from(aprobadorSolicitantes)
+            .where(eq(aprobadorSolicitantes.aprobadorId, u.id));
+          asignados = links.map((l) => l.solicitanteId);
+        }
         res.json({
           user: {
             id: u.id,
@@ -566,6 +712,7 @@ export function apiRoutes(db: Db, sap: SapProvider) {
             emp: u.empresa,
             puesto: u.puesto || "",
             activo: u.activo,
+            solicitantes: asignados,
           },
         });
       } catch {
@@ -581,6 +728,14 @@ export function apiRoutes(db: Db, sap: SapProvider) {
       if (req.user?.id === req.params.id) {
         return res.status(400).json({ error: "No puede eliminar su propio usuario" });
       }
+      await db
+        .delete(aprobadorSolicitantes)
+        .where(
+          or(
+            eq(aprobadorSolicitantes.aprobadorId, req.params.id),
+            eq(aprobadorSolicitantes.solicitanteId, req.params.id),
+          ),
+        );
       const [u] = await db
         .delete(users)
         .where(eq(users.id, req.params.id))

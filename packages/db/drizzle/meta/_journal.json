@@ -36,6 +36,20 @@
       "when": 1763500000000,
       "tag": "0004_drop_matriz_contable",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1763560000000,
+      "tag": "0005_n1_solicitantes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1763570000000,
+      "tag": "0006_n1_descripcion",
+      "breakpoints": true
     }
   ]
 }

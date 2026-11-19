@@ -178,10 +178,10 @@ async function main() {
       montoDesde: r[1],
       montoHasta: r[2],
       dentroPresupuesto: r[3],
-      nivelesRequeridos: r[0] === "R3" ? "N1+N2+N3" : r[4],
+      nivelesRequeridos: r[0] === "R3" ? "N1" : r[4],
       descripcion:
         r[0] === "R3"
-          ? "Excede presupuesto y supera Q 10,000: N1, N2 y N3"
+          ? "Excede presupuesto y supera Q 10,000: autoriza N1"
           : r[5],
     })),
   );

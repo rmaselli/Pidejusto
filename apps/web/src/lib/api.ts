@@ -9,6 +9,13 @@ export type NivelAprobacion = {
   activo: boolean;
 };
 
+export type AsignacionN1 = {
+  aprobadorId: string;
+  nombre: string;
+  empresa: string;
+  solicitantes: { id: string; nombre: string; empresa: string }[];
+};
+
 export type ReglaAprobacion = {
   id: number;
   regla: string;
@@ -26,6 +33,8 @@ export type User = {
   rol: string;
   emp: string;
   puesto: string;
+  activo?: boolean;
+  solicitantes?: string[];
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -73,6 +82,18 @@ export const api = {
       cta: { codigo: string; nombre: string }[];
       catcta: CategoriaCuenta[];
     }>(`/api/catalog/contable/${encodeURIComponent(empresa)}`),
+  cuentas: (empresa: string, q: string) =>
+    request<{ items: SapOpcion[]; company: string }>(
+      `/api/catalog/cuentas?empresa=${encodeURIComponent(empresa)}&q=${encodeURIComponent(q)}`,
+    ),
+  proyectos: (empresa: string, q: string) =>
+    request<{ items: SapOpcion[]; company: string }>(
+      `/api/catalog/proyectos?empresa=${encodeURIComponent(empresa)}&q=${encodeURIComponent(q)}`,
+    ),
+  dimensiones: (empresa: string, n: number, q: string) =>
+    request<{ items: SapOpcion[]; nombre: string; company: string }>(
+      `/api/catalog/dimensiones?empresa=${encodeURIComponent(empresa)}&n=${n}&q=${encodeURIComponent(q)}`,
+    ),
   servicioMaestros: (empresa: string) =>
     request<ServicioMaestros>(
       `/api/catalog/servicio-maestros/${encodeURIComponent(empresa)}`,
@@ -142,7 +163,10 @@ export const api = {
       body: JSON.stringify({ id }),
     }),
   adminUsers: () => request<{ users: User[] }>("/api/admin/users"),
-  patchUser: (id: string, body: Partial<User & { activo: boolean; empresa?: string }>) =>
+  patchUser: (
+    id: string,
+    body: Partial<User & { activo: boolean; empresa?: string; solicitantes?: string[] }>,
+  ) =>
     request<{ user: User }>(`/api/admin/users/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -167,6 +191,7 @@ export const api = {
       niveles: NivelAprobacion[];
       reglas: ReglaAprobacion[];
       cadenas: string[];
+      asignaciones: AsignacionN1[];
     }>("/api/niveles-aprobacion"),
   saveNivel: (
     codigo: string,

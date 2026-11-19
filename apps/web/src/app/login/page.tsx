@@ -122,7 +122,7 @@ export default function LoginPage() {
             <h2 className="font-display text-xl font-bold">Acceso corporativo</h2>
             <p className="mt-2 text-sm text-muted">
               Tu cuenta Microsoft 365 se vincula al rol asignado en PideJusto
-              (Solicitante, Aprobador N1, N2 o N3, Bodega o Admin).
+              (Solicitante, Aprobador N1, Bodega o Admin).
             </p>
             <Button
               variant="primary"

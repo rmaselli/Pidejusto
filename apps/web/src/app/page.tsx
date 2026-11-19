@@ -54,7 +54,7 @@ const ACTIONS: {
   {
     href: "/aprobacion/niveles",
     title: "Niveles de aprobación",
-    text: "Los tres niveles del flujo. El administrador puede cambiarlos",
+    text: "Aprobador N1 de solicitudes de pedido y los solicitantes de su empresa",
     roles: [...APROBADORES, "Admin"],
     icon: ShieldCheck,
   },
