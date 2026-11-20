@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@pidejusto/db";
 import {
@@ -51,6 +52,12 @@ import {
 import { resolveTransaccion, allocateDocumentNumber } from "./maestros.js";
 import type { SapProvider } from "../sap/index.js";
 import { config } from "../config.js";
+import {
+  gatewayCompanyFor,
+  getOrdenCompraDePedido,
+  getPurchaseRequest,
+  postPurchaseRequest,
+} from "../sap/gateway.js";
 
 async function nextSeq(db: Db, name: "req" | "doc") {
   const [seq] = await db
@@ -834,6 +841,173 @@ export async function enviarASAP(
   }
 
   return { ...result, rows, consolidado: cons };
+}
+
+function hoyGuatemala() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Guatemala" });
+}
+
+function camposLinea(ct: ContableImputacion) {
+  const par = (key: string, value: string) => {
+    const texto = String(value || "").trim();
+    return texto ? { [key]: texto } : {};
+  };
+  return {
+    ...par("AccountCode", ct.cta),
+    ...par("ProjectCode", ct.proy),
+    ...par("CostingCode", ct.d1),
+    ...par("CostingCode2", ct.d2),
+    ...par("CostingCode3", ct.d3),
+    ...par("CostingCode4", ct.d4),
+    ...par("CostingCode5", ct.d5),
+  };
+}
+
+export async function enviarSolicitudSap(db: Db, user: UserInfo, id: string) {
+  const req = await getSolicitud(db, id);
+  if (!req) throw Object.assign(new Error("No encontrada"), { status: 404 });
+  if (req.sapDocNum) return req;
+  const estado = req.estado as SolicitudEstado;
+  if (estado === "Rechazada" || estado === "Enviada a SAP") {
+    throw Object.assign(new Error("La solicitud no se puede enviar a SAP"), { status: 400 });
+  }
+  const defs = await listNiveles(db);
+  const mini = { estado, emp: req.empresa };
+  const puede =
+    user.rol === "Admin" ||
+    (canApprove(mini, user, defs) && (await cubreSolicitante(db, user, req.solicitanteId)));
+  if (!puede && estado !== "Aprobada") {
+    throw Object.assign(new Error("No puede enviar esta solicitud a SAP"), { status: 403 });
+  }
+  if (!req.lines.length) throw bad("La solicitud no tiene líneas");
+
+  const [bodega] = await db
+    .select()
+    .from(bodegas)
+    .where(and(eq(bodegas.empresa, req.empresa), eq(bodegas.codigo, req.bodegaCodigo)))
+    .limit(1);
+  const warehouse = (bodega?.warehouseCode || req.bodegaCodigo || "").slice(0, 8);
+  const servicio = req.clase === "servicio" || req.lines.every((l) => !l.code);
+  if (!servicio && !warehouse) throw bad("La solicitud no tiene bodega para SAP");
+
+  const company = gatewayCompanyFor(req.empresa);
+  let idem = req.sapIdempotencyKey || "";
+  if (!idem) {
+    idem = randomUUID();
+    await db
+      .update(solicitudes)
+      .set({ sapIdempotencyKey: idem })
+      .where(eq(solicitudes.id, id));
+  }
+
+  const externalRef = req.id.slice(0, 100);
+  const comments = `PideJusto ${req.id} · ${req.solicitanteNombre}`.slice(
+    0,
+    Math.max(0, 254 - externalRef.length),
+  );
+  const requiredDate = String(req.requiredDate || hoyGuatemala()).slice(0, 10);
+  const body = servicio
+    ? {
+        DocType: "dDocument_Service",
+        DocDate: hoyGuatemala(),
+        RequriedDate: requiredDate,
+        Comments: comments,
+        NumAtCard: externalRef,
+        DocumentLines: req.lines.map((l) => ({
+          ItemDescription: l.name,
+          Quantity: l.qty,
+          UnitPrice: l.price || 0,
+          RequiredDate: requiredDate,
+          ...camposLinea(l.ct as ContableImputacion),
+        })),
+      }
+    : {
+        requiredDate,
+        externalRef,
+        comments,
+        lines: req.lines.map((l) => ({
+          itemCode: l.code,
+          quantity: l.qty,
+          warehouse,
+          requiredDate,
+        })),
+      };
+
+  let doc = await postPurchaseRequest(company, body, idem, servicio);
+  if (!doc.docDate || !doc.docTime) {
+    try {
+      const leido = await getPurchaseRequest(company, doc);
+      if (leido) doc = { ...doc, ...leido, docNum: leido.docNum || doc.docNum };
+    } catch {
+      /* El número ya quedó creado; la fecha se completa en seguimiento. */
+    }
+  }
+  if (!doc.docNum) throw bad("SAP no devolvió el número de solicitud de pedido");
+
+  const nivel = nivelDeEstado(estado);
+  await db
+    .update(solicitudes)
+    .set({
+      estado: "Enviada a SAP",
+      sapDocNum: doc.docNum,
+      sapDocEntry: doc.docEntry,
+      sapDocDate: doc.docDate || null,
+      sapDocTime: doc.docTime || null,
+      approvedAt: req.approvedAt ? new Date(req.approvedAt) : new Date(),
+      sentAt: new Date(),
+    })
+    .where(eq(solicitudes.id, id));
+
+  if (nivel) {
+    await db.insert(bitacora).values({
+      solicitudId: id,
+      userName: user.nombre,
+      accion: `Aprobó ${nivel}`,
+      detalle: "Enviada a SAP",
+    });
+  }
+  await db.insert(bitacora).values({
+    solicitudId: id,
+    userName: user.nombre,
+    accion: "Enviada a SAP",
+    detalle: [
+      `Solicitud de pedido ${doc.docNum}`,
+      doc.docDate ? `creada en SAP ${doc.docDate}${doc.docTime ? ` ${doc.docTime}` : ""}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  });
+
+  return getSolicitud(db, id);
+}
+
+export async function consultarSolicitudSap(db: Db, id: string) {
+  const req = await getSolicitud(db, id);
+  if (!req) throw Object.assign(new Error("No encontrada"), { status: 404 });
+  if (!req.sapDocNum && !req.sapDocEntry) return req;
+
+  const company = gatewayCompanyFor(req.empresa);
+  const pedido = await getPurchaseRequest(company, {
+    docEntry: req.sapDocEntry,
+    docNum: req.sapDocNum,
+  });
+  const entry = pedido?.docEntry || req.sapDocEntry || null;
+  const orden = entry ? await getOrdenCompraDePedido(company, entry) : null;
+
+  await db
+    .update(solicitudes)
+    .set({
+      sapDocNum: pedido?.docNum || req.sapDocNum,
+      sapDocEntry: entry,
+      sapDocDate: pedido?.docDate || req.sapDocDate || null,
+      sapDocTime: pedido?.docTime || req.sapDocTime || null,
+      ordenCompraNum: orden?.docNum || req.ordenCompraNum || null,
+      ordenCompraFecha: orden?.docDate || req.ordenCompraFecha || null,
+      ordenCompraHora: orden?.docTime || req.ordenCompraHora || null,
+    })
+    .where(eq(solicitudes.id, id));
+
+  return getSolicitud(db, id);
 }
 
 export async function metricas(db: Db) {

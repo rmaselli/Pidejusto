@@ -6,12 +6,27 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { dimsLinea, fFecha, fQ, mayus } from "@/lib/utils";
 
+function cantidadTxt(n: number) {
+  return Number.isInteger(n)
+    ? String(n)
+    : n.toLocaleString("es-GT", { maximumFractionDigits: 2 });
+}
+
+function cantidadSolicitada(r: Solicitud) {
+  return r.lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+}
+
+function pideMasQueMinimo(r: Solicitud) {
+  return r.lines.some((l) => (l.min || 0) > 0 && l.qty > (l.min || 0));
+}
+
 export default function AprobarPage() {
   const [items, setItems] = useState<Solicitud[]>([]);
   const [sel, setSel] = useState<Solicitud | null>(null);
   const [comentario, setComentario] = useState("");
   const [ai, setAi] = useState("");
   const [msg, setMsg] = useState("");
+  const [enviando, setEnviando] = useState(false);
 
   async function load() {
     const r = await api.pendientes();
@@ -21,6 +36,25 @@ export default function AprobarPage() {
   useEffect(() => {
     void load().catch((e) => setMsg(e.message));
   }, []);
+
+  async function enviarSap() {
+    if (!sel || enviando) return;
+    setEnviando(true);
+    setMsg("");
+    try {
+      const updated = await api.enviarSolicitudSap(sel.id);
+      setMsg(
+        `${updated.id} enviada a SAP · solicitud de pedido ${updated.sapDocNum || ""}`,
+      );
+      setSel(null);
+      setComentario("");
+      await load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setEnviando(false);
+    }
+  }
 
   async function act(kind: "aprobar" | "rechazar") {
     if (!sel) return;
@@ -62,14 +96,17 @@ export default function AprobarPage() {
                   <div className="text-xs font-bold text-brand-700">{r.empresa}</div>
                   <div className="font-bold">{r.id}</div>
                   <div className="text-sm text-muted">{r.solicitanteNombre}</div>
+                  <div className="text-sm text-muted">
+                    Cantidad {cantidadTxt(cantidadSolicitada(r))}
+                  </div>
                 </div>
                 <div className="font-display text-xl font-extrabold">{fQ(r.total)}</div>
               </div>
+              {pideMasQueMinimo(r) && (
+                <p className="mt-2 text-sm">Se está pidiendo más que el mínimo</p>
+              )}
               <div className="mt-2 flex flex-wrap gap-1">
                 <Badge tone="dark">{r.estado}</Badge>
-                <Badge tone={r.dentroPresupuesto ? "ok" : "bad"}>
-                  {r.dentroPresupuesto ? "En presupuesto" : "Fuera presupuesto"}
-                </Badge>
                 <Badge>{r.ruta?.regla}</Badge>
               </div>
             </Card>
@@ -80,7 +117,12 @@ export default function AprobarPage() {
       {sel ? (
         <Card>
           <h2 className="font-display text-xl font-bold">{sel.id}</h2>
-          <p className="text-sm text-muted">{sel.ruta?.desc}</p>
+          <p className="text-sm text-muted">
+            Cantidad solicitada {cantidadTxt(cantidadSolicitada(sel))}
+          </p>
+          {pideMasQueMinimo(sel) && (
+            <p className="mt-1 text-sm">Se está pidiendo más que el mínimo</p>
+          )}
           <div className="mt-4 space-y-2">
             {sel.lines.map((l, i) => (
               <div key={i} className="rounded-xl border border-line p-3 text-sm">
@@ -117,17 +159,18 @@ export default function AprobarPage() {
           </div>
           <Button
             className="mt-4 w-full"
-            variant="claude"
+            variant="ghost"
             onClick={() =>
-              void api.aiResumen(sel.id).then((r) =>
-                setAi(`${r.source === "local" ? "Motor local · sin Claude\n" : ""}${r.text}`),
-              )
+              void api
+                .aiResumen(sel.id)
+                .then((r) => setAi(r.text))
+                .catch((e) => setMsg((e as Error).message))
             }
           >
             Resumen
           </Button>
           {ai && (
-            <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-brand-600 bg-soft p-3 text-sm">
+            <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-line bg-soft p-3 text-sm">
               {ai}
             </pre>
           )}
@@ -137,6 +180,14 @@ export default function AprobarPage() {
             value={comentario}
             onChange={(e) => setComentario(mayus(e.target.value))}
           />
+          <Button
+            className="mt-4 w-full"
+            variant="dark"
+            disabled={enviando}
+            onClick={() => void enviarSap()}
+          >
+            {enviando ? "Enviando a SAP…" : "Enviar a SAP"}
+          </Button>
           <div className="mt-3 flex gap-2">
             <Button variant="danger" className="flex-1" onClick={() => void act("rechazar")}>
               Rechazar

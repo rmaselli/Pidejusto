@@ -125,6 +125,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ comentario }),
     }),
+  enviarSolicitudSap: (id: string) =>
+    request<Solicitud>(`/api/solicitudes/${id}/enviar-sap`, { method: "POST", body: "{}" }),
+  seguimientoSap: (id: string) => request<Solicitud>(`/api/solicitudes/${id}/sap`),
   aprobadas: () => request<{ items: Solicitud[] }>("/api/bodega/aprobadas"),
   enviarSap: (ids: string[]) =>
     request<{
@@ -383,6 +386,12 @@ export type SolicitudListItem = {
   tipoDocumento?: string;
   docNum?: string;
   sapDocNum?: string;
+  sapDocEntry?: number | null;
+  sapDocDate?: string | null;
+  sapDocTime?: string | null;
+  ordenCompraNum?: string | null;
+  ordenCompraFecha?: string | null;
+  ordenCompraHora?: string | null;
   companyDb?: string;
   solicitanteNombre: string;
   estado: string;
@@ -401,6 +410,7 @@ export type Solicitud = SolicitudListItem & {
     qty: number;
     price?: number;
     sug: number;
+    min?: number;
     alerta: string;
     total: number;
     just: string;

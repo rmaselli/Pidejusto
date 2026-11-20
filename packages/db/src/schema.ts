@@ -202,7 +202,17 @@ export const solicitudes = pgTable("solicitudes", {
   bodegaCodigo: varchar("bodega_codigo", { length: 32 }).notNull().default(""),
   tipoDocumento: varchar("tipo_documento", { length: 32 }).notNull().default("SC"),
   docNum: varchar("doc_num", { length: 64 }),
+  /** Número de solicitud de pedido devuelto por SAP (DocNum). */
   sapDocNum: varchar("sap_doc_num", { length: 64 }),
+  sapDocEntry: integer("sap_doc_entry"),
+  /** Fecha y hora en que SAP creó la solicitud de pedido. */
+  sapDocDate: varchar("sap_doc_date", { length: 16 }),
+  sapDocTime: varchar("sap_doc_time", { length: 16 }),
+  /** Número de orden de compra cuando SAP convierte la solicitud. */
+  ordenCompraNum: varchar("orden_compra_num", { length: 64 }),
+  ordenCompraFecha: varchar("orden_compra_fecha", { length: 16 }),
+  ordenCompraHora: varchar("orden_compra_hora", { length: 16 }),
+  sapIdempotencyKey: varchar("sap_idempotency_key", { length: 64 }),
   companyDb: varchar("company_db", { length: 128 }).notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   approvedAt: timestamp("approved_at", { withTimezone: true }),

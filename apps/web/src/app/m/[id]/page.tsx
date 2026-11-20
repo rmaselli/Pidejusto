@@ -90,17 +90,13 @@ export default function MobileDetalle() {
       </div>
 
       <Button
-        variant="claude"
+        variant="ghost"
         className="w-full min-h-12 rounded-2xl"
         onClick={() =>
-          void api.aiResumen(req.id).then((r) =>
-            setAi(
-              `${r.source === "local" ? "Motor local · sin Claude\n" : ""}${r.text}`,
-            ),
-          )
+          void api.aiResumen(req.id).then((r) => setAi(r.text))
         }
       >
-        Resumen con Claude
+        Resumen
       </Button>
       {ai && (
         <pre className="whitespace-pre-wrap rounded-2xl border border-brand-600 bg-soft p-3 text-sm">

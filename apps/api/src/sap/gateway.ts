@@ -304,8 +304,9 @@ export function gatewayCompanyFor(empresaCodigo: string) {
 async function gatewayPost(
   path: string,
   company: string,
-  idempotencyKey = randomUUID(),
+  idempotencyKey: string = randomUUID(),
   attempt = 0,
+  payload: unknown = {},
 ): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(config.sap.timeoutMs, 30000));
@@ -319,7 +320,7 @@ async function gatewayPost(
         "X-Company": company,
         "Idempotency-Key": idempotencyKey,
       },
-      body: "{}",
+      body: JSON.stringify(payload ?? {}),
       signal: controller.signal,
     });
     const body = (await res.json().catch(() => ({}))) as {
@@ -334,7 +335,7 @@ async function gatewayPost(
     if (attempt < 1 && [429, 502, 504].includes(res.status)) {
       const wait = Number(res.headers.get("Retry-After")) || 1;
       await delay(Math.min(wait, 5) * 1000);
-      return gatewayPost(path, company, idempotencyKey, attempt + 1);
+      return gatewayPost(path, company, idempotencyKey, attempt + 1, payload);
     }
 
     const code = body.error || `HTTP_${res.status}`;
@@ -397,6 +398,123 @@ async function gatewayGet(path: string, company: string, attempt = 0): Promise<u
     );
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export type SapDocumento = {
+  docEntry: number | null;
+  docNum: string;
+  docDate: string;
+  docTime: string;
+};
+
+function asRecord(data: unknown): Record<string, unknown> {
+  return data && typeof data === "object" && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : {};
+}
+
+function horaSap(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const entero = Math.floor(value);
+    const comoReloj = String(entero).padStart(6, "0");
+    if (entero >= 0 && entero <= 235959 && comoReloj.slice(0, 2) <= "23") {
+      return `${comoReloj.slice(0, 2)}:${comoReloj.slice(2, 4)}:${comoReloj.slice(4, 6)}`;
+    }
+    const hh = Math.floor(entero / 3600);
+    const mm = Math.floor((entero % 3600) / 60);
+    const ss = entero % 60;
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+  const texto = String(value).trim();
+  if (/^\d{1,2}:\d{2}$/.test(texto)) return `${texto}:00`;
+  if (/^\d{1,2}:\d{2}:\d{2}$/.test(texto)) return texto;
+  if (/^\d{5,6}$/.test(texto)) {
+    const n = texto.padStart(6, "0");
+    return `${n.slice(0, 2)}:${n.slice(2, 4)}:${n.slice(4, 6)}`;
+  }
+  return texto;
+}
+
+export function documentoSap(data: unknown): SapDocumento {
+  const row = asRecord(data);
+  const entry = Number(row.docEntry ?? row.DocEntry);
+  return {
+    docEntry: Number.isFinite(entry) && entry > 0 ? entry : null,
+    docNum: String(row.docNum ?? row.DocNum ?? "").trim(),
+    docDate: String(row.DocDate ?? row.CreationDate ?? row.docDate ?? "").slice(0, 10),
+    docTime: horaSap(row.DocTime ?? row.docTime),
+  };
+}
+
+/** POST PurchaseRequests. Artículos usan el endpoint de negocio; servicios, la entidad OData. */
+export async function postPurchaseRequest(
+  company: string,
+  body: Record<string, unknown>,
+  idempotencyKey: string,
+  odata = false,
+): Promise<SapDocumento> {
+  if (!config.gateway.apiKey) {
+    throw new GatewayError("Pasarela SAP sin API key", 503, "NOT_CONFIGURED");
+  }
+  const path = odata ? "/api/v1/odata/PurchaseRequests" : "/api/v1/purchase-requests";
+  const data = await gatewayPost(path, company, idempotencyKey, 0, body);
+  const doc = documentoSap(data);
+  if (!doc.docNum && !doc.docEntry) {
+    throw new GatewayError("SAP no devolvió el número de solicitud de pedido", 502, "SAP_ERROR");
+  }
+  return doc;
+}
+
+const PR_SELECT = "DocEntry,DocNum,DocDate,DocTime,CreationDate,UpdateDate,DocumentStatus";
+
+/** GET PurchaseRequests: fecha y hora de creación de la solicitud de pedido. */
+export async function getPurchaseRequest(
+  company: string,
+  ref: { docEntry?: number | null; docNum?: string | null },
+): Promise<SapDocumento | null> {
+  if (!config.gateway.apiKey) {
+    throw new GatewayError("Pasarela SAP sin API key", 503, "NOT_CONFIGURED");
+  }
+  if (ref.docEntry) {
+    const data = await gatewayGet(
+      `/api/v1/odata/PurchaseRequests(${ref.docEntry})?$select=${PR_SELECT}`,
+      company,
+    );
+    const doc = documentoSap(data);
+    return doc.docNum || doc.docEntry ? doc : null;
+  }
+  const num = String(ref.docNum || "").trim();
+  if (!/^\d+$/.test(num)) return null;
+  const data = await gatewayGet(
+    `/api/v1/odata/PurchaseRequests?$select=${PR_SELECT}&$filter=DocNum eq ${num}&$top=1`,
+    company,
+  );
+  const row = readValue(data)[0];
+  return row ? documentoSap(row) : null;
+}
+
+/**
+ * La orden de compra queda ligada en SAP por BaseType 1470000113 (solicitud de pedido)
+ * y BaseEntry. PurchaseRequests no trae ese número.
+ */
+export async function getOrdenCompraDePedido(
+  company: string,
+  docEntry: number,
+): Promise<SapDocumento | null> {
+  if (!config.gateway.apiKey || !docEntry) return null;
+  const filter = `DocumentLines/any(l:l/BaseType eq 1470000113 and l/BaseEntry eq ${docEntry})`;
+  try {
+    const data = await gatewayGet(
+      `/api/v1/odata/PurchaseOrders?$select=DocEntry,DocNum,DocDate,DocTime,CreationDate&$filter=${encodeURIComponent(filter)}&$top=1`,
+      company,
+    );
+    const row = readValue(data)[0];
+    return row ? documentoSap(row) : null;
+  } catch (e) {
+    if (!(e instanceof GatewayError) || !esFalta(e)) throw e;
+    return null;
   }
 }
 

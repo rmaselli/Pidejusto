@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@pidejusto/shared"],
+  devIndicators: false,
   // Microsoft (Entra ID) vuelve a WEB_URL/auth/callback; se reenvía a la API,
   // que crea la sesión y redirige a la página principal.
   async rewrites() {

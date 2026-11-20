@@ -7,16 +7,32 @@ import { dimsLinea, fFecha, fQ } from "@/lib/utils";
 
 const STEPS = ["Pendiente N1", "Aprobada", "Enviada a SAP"];
 
+function fSap(fecha?: string | null, hora?: string | null) {
+  const dia = String(fecha || "").slice(0, 10);
+  const [y, m, d] = dia.split("-");
+  const texto = y && m && d ? `${d}/${m}/${y.slice(2)}` : "";
+  return [texto, hora || ""].filter(Boolean).join(" ");
+}
+
 export default function SeguimientoPage() {
   const [items, setItems] = useState<SolicitudListItem[]>([]);
   const [sel, setSel] = useState<Solicitud | null>(null);
+  const [sapMsg, setSapMsg] = useState("");
 
   useEffect(() => {
     void api.solicitudes().then((r) => setItems(r.items));
   }, []);
 
   async function open(id: string) {
-    setSel(await api.solicitud(id));
+    setSapMsg("");
+    const item = await api.solicitud(id);
+    setSel(item);
+    if (!item.sapDocNum && !item.sapDocEntry) return;
+    try {
+      setSel(await api.seguimientoSap(id));
+    } catch (e) {
+      setSapMsg((e as Error).message);
+    }
   }
 
   return (
@@ -56,8 +72,36 @@ export default function SeguimientoPage() {
             {sel.tipoDocumento ? ` · ${sel.tipoDocumento}` : ""}
             {sel.docNum ? ` ${sel.docNum}` : ""}
             {sel.companyDb ? ` · ${sel.companyDb}` : ""}
-            {sel.sapDocNum ? ` · SAP ${sel.sapDocNum}` : ""}
+            {sel.sapDocNum ? ` · solicitud de pedido ${sel.sapDocNum}` : ""}
           </p>
+          <div className="mt-3 rounded-xl border border-line p-3 text-sm">
+            <div className="text-xs font-bold uppercase text-muted">SAP</div>
+            {sel.sapDocNum ? (
+              <div className="mt-2 space-y-1">
+                <div>
+                  Solicitud de pedido <b>{sel.sapDocNum}</b>
+                  {fSap(sel.sapDocDate, sel.sapDocTime)
+                    ? ` · creada ${fSap(sel.sapDocDate, sel.sapDocTime)}`
+                    : ""}
+                </div>
+                <div>
+                  {sel.ordenCompraNum ? (
+                    <>
+                      Orden de compra <b>{sel.ordenCompraNum}</b>
+                      {fSap(sel.ordenCompraFecha, sel.ordenCompraHora)
+                        ? ` · creada ${fSap(sel.ordenCompraFecha, sel.ordenCompraHora)}`
+                        : ""}
+                    </>
+                  ) : (
+                    "Aún no se convierte en orden de compra"
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-muted">Todavía no se envía a SAP.</p>
+            )}
+            {sapMsg && <p className="mt-2 text-muted">{sapMsg}</p>}
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-1">
             {STEPS.map((s, i) => {
               const idx = STEPS.indexOf(sel.estado);

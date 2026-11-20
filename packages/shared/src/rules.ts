@@ -549,35 +549,21 @@ export function localResumen(req: {
   lines: LineaSolicitud[];
   ruta: RutaAprobacion;
 }): string {
-  const fuera = req.bud.cats.filter((c) => !c.dentro);
-  const sobre = req.lines.filter((l) => l.alerta === "Sobre máximo");
-  const invalidas = req.lines.filter((l) => !l.ct.ok).length;
-  const riesgo =
-    (fuera.length ? 2 : 0) + (sobre.length ? 1 : 0) + (invalidas ? 1 : 0);
-  const rec =
-    riesgo === 0 ? "Aprobar" : riesgo <= 2 ? "Aprobar con ajuste" : "Rechazar";
+  const cant = req.lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+  const sobreMin = req.lines.filter((l) => (l.min || 0) > 0 && l.qty > l.min);
+  const invalidas = req.lines.filter((l) => !l.ct.ok);
+  const lineas = req.lines.map((l) => `${l.name}: cantidad ${l.qty}`).join("; ");
   return [
-    `• **Presupuesto:** ${
-      fuera.length
-        ? fuera
-            .map(
-              (c) =>
-                `${c.cat}: pide ${fQ(c.monto)} y solo hay ${fQ(Math.max(c.disp, 0))} disponibles`,
-            )
-            .join("; ")
-        : "todas las categorías caben en su presupuesto disponible"
-    }.`,
-    `• **Inventario:** ${
-      sobre.length
-        ? `${sobre.length} línea(s) sobre máximo (${sobre.map((l) => l.code).join(", ")})`
-        : "sin alertas de sobrepedido"
-    }.`,
-    `• **Contabilidad:** ${
-      invalidas
-        ? invalidas + " línea(s) con imputación inválida"
-        : "todas las líneas tienen cuenta asignada"
-    }.`,
-    `• **Ruta:** ${req.ruta.regla} · ${nivelTxt(req.ruta.niveles)} · total ${fQ(req.total)}.`,
-    `Recomendación: ${rec}`,
+    `Cantidad solicitada: ${cant}. Total ${fQ(req.total)}.`,
+    lineas ? `Líneas: ${lineas}.` : "Sin líneas.",
+    sobreMin.length
+      ? `Se está pidiendo más que el mínimo en ${sobreMin
+          .map((l) => `${l.name} (pide ${l.qty}, mínimo ${l.min})`)
+          .join("; ")}.`
+      : "Ninguna línea pide más que su mínimo.",
+    invalidas.length
+      ? `${invalidas.length} línea(s) sin cuenta asignada.`
+      : "Las líneas tienen cuenta asignada.",
+    "Autorización: nivel N1.",
   ].join("\n");
 }

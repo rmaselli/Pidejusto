@@ -20,6 +20,7 @@ import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { SapProvider } from "../sap/index.js";
 import { SapUpstreamUnavailable } from "../sap/index.js";
 import {
+  GatewayError,
   gatewayCompanyFor,
   loadServicioMaestros,
   searchCuentasGateway,
@@ -41,8 +42,10 @@ import {
 } from "../services/catalog.js";
 import {
   aprobarSolicitud,
+  consultarSolicitudSap,
   createSolicitud,
   enviarASAP,
+  enviarSolicitudSap,
   getSolicitud,
   historialAprobador,
   listAprobadas,
@@ -287,6 +290,38 @@ export function apiRoutes(db: Db, sap: SapProvider) {
         req.body?.comentario,
       );
       res.json(item);
+    }),
+  );
+
+  r.post(
+    "/solicitudes/:id/enviar-sap",
+    requireRole("Aprobador N1", "Aprobador N2", "Aprobador N3", "Admin"),
+    asyncHandler(async (req, res) => {
+      try {
+        res.json(await enviarSolicitudSap(db, req.user!, req.params.id));
+      } catch (e) {
+        if (e instanceof GatewayError || e instanceof SapUpstreamUnavailable) {
+          return res.status(e.status || 503).json({ error: e.message, code: e instanceof GatewayError ? e.code : "SapUpstreamUnavailable" });
+        }
+        throw e;
+      }
+    }),
+  );
+
+  r.get(
+    "/solicitudes/:id/sap",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      try {
+        const item = await consultarSolicitudSap(db, req.params.id);
+        if (!item) return res.status(404).json({ error: "No encontrada" });
+        res.json(item);
+      } catch (e) {
+        if (e instanceof GatewayError) {
+          return res.status(e.status || 502).json({ error: e.message, code: e.code });
+        }
+        throw e;
+      }
     }),
   );
 
@@ -651,11 +686,9 @@ export function apiRoutes(db: Db, sap: SapProvider) {
         ? [...new Set((req.body.solicitantes as unknown[]).map((id) => String(id)))]
         : null;
       try {
-        const [u] = await db
-          .update(users)
-          .set(patch)
-          .where(eq(users.id, req.params.id))
-          .returning();
+        const [u] = Object.keys(patch).length
+          ? await db.update(users).set(patch).where(eq(users.id, req.params.id)).returning()
+          : await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
         if (!u) return res.status(404).json({ error: "No encontrado" });
         let asignados: string[] = [];
         if (u.rol !== "Aprobador N1") {
@@ -715,8 +748,14 @@ export function apiRoutes(db: Db, sap: SapProvider) {
             solicitantes: asignados,
           },
         });
-      } catch {
-        res.status(409).json({ error: "Ya existe un usuario con ese correo" });
+      } catch (e) {
+        const code =
+          (e as { code?: string; cause?: { code?: string } }).code ||
+          (e as { cause?: { code?: string } }).cause?.code;
+        if (code === "23505") {
+          return res.status(409).json({ error: "Ya existe un usuario con ese correo" });
+        }
+        throw e;
       }
     }),
   );

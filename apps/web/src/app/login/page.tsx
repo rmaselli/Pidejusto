@@ -102,6 +102,13 @@ export default function LoginPage() {
     <div className="min-h-screen px-4 py-10">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8 text-center">
+          <img
+            src="/logo-pidejusto.png"
+            alt="PideJusto"
+            width={112}
+            height={112}
+            className="mx-auto mb-4 h-28 w-28 rounded-[28px] shadow-md"
+          />
           <div className="inline-block rounded-full bg-lima px-3 py-1 font-display text-sm font-bold text-brand-900">
             Grupo M.E.M.E.
           </div>

@@ -108,12 +108,5 @@ export async function aiResumen(req: {
   lines: LineaSolicitud[];
   ruta: RutaAprobacion;
 }) {
-  const system =
-    'Resume riesgos para un aprobador. Exactamente 4 viñetas que empiecen con "• " y termina con "Recomendación: Aprobar" | "Aprobar con ajuste" | "Rechazar".';
-  const raw = await claude(
-    system,
-    `Solicitud ${req.id} de ${req.solicitante} (${req.emp}), total ${req.total}, ruta ${req.ruta.regla}.\nLíneas: ${JSON.stringify(req.lines.map((l) => ({ art: l.name, cat: l.cat, pide: l.qty, sugerida: l.sug, alerta: l.alerta, total: l.total, cuenta: l.ct.cta })))}\nPresupuesto: ${JSON.stringify(req.bud.cats)}\nComentario: ${req.comentario || "—"}`,
-  );
-  if (raw) return { source: "claude" as const, text: raw };
   return { source: "local" as const, text: localResumen(req) };
 }
